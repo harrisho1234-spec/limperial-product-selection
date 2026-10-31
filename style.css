@@ -36,3 +36,6 @@
 #liGoogleSignIn{min-height:48px}
 @media(max-width:900px){nav button{font-size:8px;gap:1px}nav button span{font-size:17px}}
 @media(max-width:600px){.team-photo-placeholder{width:84px;height:100px}}
+
+/* Position the first newly displayed catalog item below the header after Load more. */
+.card[data-new-batch-start="true"]{scroll-margin-top:24px}
