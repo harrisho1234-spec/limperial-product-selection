@@ -37,8 +37,6 @@
 @media(max-width:900px){nav button{font-size:8px;gap:1px}nav button span{font-size:17px}}
 @media(max-width:600px){.team-photo-placeholder{width:84px;height:100px}}
 
-/* Position the first newly displayed catalog item below the header after Load more. */
-.card[data-new-batch-start="true"]{scroll-margin-top:24px}
 
 /* Independently selectable designs cropped from original catalog pages. */
 .catalog-crop-window{position:relative;width:100%;height:100%;overflow:hidden;background:#151515}
@@ -46,3 +44,6 @@
 .card-photo>.catalog-crop-window,.preview>.catalog-crop-window,.selection-thumb>.catalog-crop-window{height:100%;width:100%}
 .split-layout-tools{display:flex;flex-wrap:wrap;gap:7px;margin:9px 0 0}
 .split-layout-tools .btn{font-size:11px}
+
+/* Keep the catalog viewport anchored on existing products while additional cards append below. */
+.catalog-more{overflow-anchor:none}
