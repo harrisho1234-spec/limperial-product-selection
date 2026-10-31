@@ -80,7 +80,7 @@
       if(ACTIVE_BRAND_ID===brandId&&VIEW!=='team')render();
       throw err;
    }).finally(()=>{loading.delete(brandId);progress.delete(brandId)});
-   loading.set(brandId,run);return run;
+   loading.set(brandId,run);run.finally(()=>{if(ACTIVE_BRAND_ID===brandId&&VIEW!=='team'&&typeof render==='function')render()}).catch(()=>{});return run;
  }
  function onSignedIn(data){
    entries.clear();for(const row of data.catalogs||[]){if(row?.brandId&&row.version)entries.set(row.brandId,row)}
