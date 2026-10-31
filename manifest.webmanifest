@@ -1,8 +1,8 @@
 {
   "name": "L'Imperial Product Selection",
-  "short_name": "L'Imperial Selection",
-  "start_url": "./",
-  "scope": "./",
+  "short_name": "Product Selection",
+  "start_url": "/limperial-product-selection/",
+  "scope": "/limperial-product-selection/",
   "display": "standalone",
   "background_color": "#f6f6f4",
   "theme_color": "#0d1626",
@@ -27,5 +27,5 @@
       "purpose": "maskable"
     }
   ],
-  "id": "./"
+  "id": "/limperial-product-selection/"
 }
