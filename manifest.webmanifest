@@ -27,5 +27,9 @@
       "purpose": "maskable"
     }
   ],
-  "id": "/limperial-product-selection/"
+  "id": "/limperial-product-selection/",
+  "launch_handler": {
+    "client_mode": "navigate-new"
+  },
+  "prefer_related_applications": false
 }
