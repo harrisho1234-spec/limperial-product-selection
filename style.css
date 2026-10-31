@@ -14,3 +14,16 @@
 .selection-card-head .tiny{margin-top:3px}
 .selection-card-actions{margin-top:10px}
 @media(max-width:600px){.selection-card-head{gap:10px}.selection-thumb{width:84px;height:100px;flex-basis:84px}.selection-photo-button{width:84px;flex-basis:84px}.selection-card-head .variant-top{gap:8px}.selection-card-head .variant-top .tiny{font-size:10px}.selection-item .variant-fields{grid-template-columns:1fr}.selection-item .field.span2{grid-column:auto}}
+
+/* Multi-brand supplier workspace */
+.brand-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:17px;margin:16px 0 22px}
+.brand-card{background:var(--card);border:1px solid var(--line);border-radius:15px;padding:20px;display:flex;gap:16px;min-width:0}
+.brand-art{flex:0 0 56px;width:56px;height:56px;display:grid;place-items:center;border-radius:13px;background:#f5ede3;color:#a57c3d;font-size:28px}
+.brand-card-copy{min-width:0;flex:1}
+.brand-card-copy h3{font-size:16px;margin:1px 0 5px;overflow-wrap:anywhere}
+.brand-card-copy p{margin:9px 0 13px}
+.brand-import-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:0 0 16px;padding:11px 15px;background:white;border:1px solid var(--line);border-radius:12px}
+.brand-import-toolbar .tiny{margin-right:auto;font-weight:600}
+.brand-import-toolbar label{cursor:pointer}
+@media(max-width:900px){nav{grid-template-columns:repeat(6,minmax(0,1fr))}.brand-card{padding:14px}.brand-art{flex-basis:48px;width:48px;height:48px}.brand-import-toolbar{align-items:stretch}}
+@media(max-width:410px){nav button{font-size:8px;padding:7px 0;gap:0}nav button span{font-size:17px}}
