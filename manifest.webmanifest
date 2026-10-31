@@ -1,1 +1,31 @@
-{"name":"L'Imperial Product Selection","short_name":"L'Imperial Selection","start_url":"./","scope":"./","display":"standalone","background_color":"#f6f6f4","theme_color":"#0d1626","description":"Visual supplier catalog and showroom collection selection"}
+{
+  "name": "L'Imperial Product Selection",
+  "short_name": "L'Imperial Selection",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f6f4",
+  "theme_color": "#0d1626",
+  "description": "Visual supplier catalog and showroom collection selection",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "id": "./"
+}

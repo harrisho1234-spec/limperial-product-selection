@@ -1,5 +1,5 @@
-const CACHE='limperial-selection-shell-v2';
-const FILES=['./','./index.html','./app.js','./style.css','./manifest.webmanifest'];
+const CACHE='limperial-selection-shell-v3';
+const FILES=['./','./index.html','./app.js','./style.css','./manifest.webmanifest','./favicon.ico','./favicon-32.png','./favicon-48.png','./icon-192.png','./icon-512.png','./icon-maskable-512.png','./apple-touch-icon.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(Promise.all([
   caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('limperial-selection-shell-')&&key!==CACHE).map(key=>caches.delete(key)))),
