@@ -10,11 +10,12 @@
  const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
  function self(){return {email,role,name:displayName}}
  function hasRole(){return ['Super Admin','Admin','Manager'].includes(role)}
- function settingsValid(){return /^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(config.clientId||'')&&/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(config.scriptUrl||'')}
+ function normalizeConfigValue(value){return String(value??'').replace(/[\s\u200B-\u200D\uFEFF]+/g,'')}
+ function settingsValid(){return /^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(normalizeConfigValue(config.clientId))&&/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(normalizeConfigValue(config.scriptUrl))}
  function statusView(){return {status,email,role,lastError,ready,lastFetched,connected:!!token&&ready}}
  function info(text){const n=document.getElementById('teamSyncNotice');if(n)n.textContent=text}
  function paint(){if(typeof VIEW!=='undefined'&&VIEW==='team')render()}
- function saveConfig(next){if(!/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(next.clientId||''))throw Error('Enter the Web OAuth Client ID from Google Cloud');if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(next.scriptUrl||''))throw Error('Enter the deployed Apps Script Web App /exec URL');config={clientId:next.clientId.trim(),scriptUrl:next.scriptUrl.trim()};localStorage.setItem(KEY,JSON.stringify(config));status='configured';lastError='';disconnect(false);paint();return true}
+ function saveConfig(next){const clientId=normalizeConfigValue(next.clientId),scriptUrl=normalizeConfigValue(next.scriptUrl);if(!/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(clientId))throw Error('Enter the Web OAuth Client ID from Google Cloud');if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(scriptUrl))throw Error('Enter the deployed Apps Script Web App /exec URL');config={clientId,scriptUrl};localStorage.setItem(KEY,JSON.stringify(config));status='configured';lastError='';disconnect(false);paint();return true}
  function frame(){if(!settingsValid())throw Error('Configure Apps Script URL and OAuth Client ID first');if(iframe)return;
   iframe=document.createElement('iframe');iframe.setAttribute('aria-hidden','true');iframe.setAttribute('title','Secure LImperial Google Sync');iframe.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;left:-10000px;';iframe.referrerPolicy='no-referrer';iframe.src=config.scriptUrl;document.body.appendChild(iframe);}
  function acceptedOrigin(origin){try{const u=new URL(origin);return u.protocol==='https:'&&(u.hostname==='script.google.com'||u.hostname==='script.googleusercontent.com'||u.hostname.endsWith('.googleusercontent.com'))}catch(_){return false}}
