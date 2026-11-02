@@ -65,8 +65,61 @@ function download(name,text,type='application/json'){const blob=new Blob([text],
 function backup(){download('LImperial_'+brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Selections_'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({format:'limperial-selection-backup',version:2,brandId:ACTIVE_BRAND_ID,brandName:brandNow().name,when:new Date().toISOString(),state:S},null,2));toast('Selection backup downloaded for '+brandNow().name)}
 async function restore(file){try{const b=JSON.parse(await file.text());if(b.format!=='limperial-selection-backup'||!b.state)throw Error('Invalid selection backup');if((b.brandId||'asfour')!==ACTIVE_BRAND_ID)throw Error('Backup is for another brand. Open that brand first.');if(!confirm('Replace the selections stored on this browser with the backup?'))return;S=b.state;save();render();toast('Selections restored')}catch(e){alert('Restore failed: '+e.message)}}
 function draftRows(){const chosen=['Select','Approved'];return [...allVariants().filter(v=>chosen.includes(variantEntry(v).decision)).map(item=>({id:item.id,item,entry:variantEntry(item),family:item.familyId})),...candidates().filter(i=>chosen.includes(candidateEntry(i).decision)).map(item=>({id:item.id,item,entry:candidateEntry(item),family:'CATALOG'}))]}
-function exportDraftCsv(rows){const header=['No.','Family','Supplier code','Version or product','Selected/proposed size','Supplier status','Qty','Finishing','Crystal','Custom request','Source reference'];const body=rows.map((r,i)=>[i+1,r.family,r.entry.code||'',r.item.type||r.item.name||'',r.entry.targetSize||'',r.entry.supplierStatus||'Not requested',r.entry.qty||'',r.entry.finish||'',r.entry.crystal||'',r.entry.request||'',refLabel(r)]);const csv=[header,...body].map(a=>a.map(x=>'"'+String(x??'').replaceAll('"','""')+'"').join(',')).join('\r\n');download(brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_Selections.csv',csv,'text/csv;charset=utf-8');}
-async function exportDraft(){const rows=draftRows();if(!rows.length){toast('Select a product first to download a draft');return;}if(!window.ExcelJS){exportDraftCsv(rows);toast('Excel library unavailable; downloaded CSV draft instead');return;}try{const book=new ExcelJS.Workbook();book.creator="L'Imperial Product Selection Studio";const ws=book.addWorksheet('Draft Selections',{views:[{state:'frozen',ySplit:2}]});ws.mergeCells('A1:K1');ws.getCell('A1').value="L'IMPERIAL · '+brandNow().name.toUpperCase()+' DRAFT SELECTION — NOT A PURCHASE ORDER";ws.getCell('A1').font={bold:true,size:14,color:{argb:'FFFFFFFF'}};ws.getCell('A1').fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF13233A'}};ws.getRow(1).height=36;ws.getRow(2).values=['No.','Product photo','Family','Code','Version / product','Proposed size','Supplier status','Qty','Crystal / finish','Custom request','Source'];ws.getRow(2).font={bold:true};ws.getRow(2).height=30;ws.columns=[{width:7},{width:24},{width:14},{width:26},{width:27},{width:26},{width:21},{width:9},{width:23},{width:45},{width:40}];for(let n=0;n<rows.length;n++){const r=rows[n],i=n+3,e=r.entry;const row=ws.getRow(i);row.values=[n+1,'',r.family,e.code||'Custom reference pending',r.item.type||r.item.name||'',e.targetSize||'',e.supplierStatus||'Not requested',Number(e.qty)||'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||'',refLabel(r)];row.height=108;row.alignment={vertical:'middle',wrapText:true};try{const pic=await imageFromSprite(r.item.sprite);if(pic){const picId=book.addImage({base64:pic,extension:'png'});ws.addImage(picId,{tl:{col:1.15,row:i-1+0.05},ext:{width:122,height:122},editAs:'oneCell'})}else{ws.getCell(i,2).value='See source'}}catch(err){ws.getCell(i,2).value='See source'}}const buf=await book.xlsx.writeBuffer();const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_Selections_'+new Date().toISOString().slice(0,10)+'.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),15000);toast('Downloaded '+rows.length+' draft selections with reference photos')}catch(e){console.error('Draft export error',e);exportDraftCsv(rows);toast('Excel export failed; downloaded CSV draft instead')}}
+function exportDraftCsv(rows){
+  // CSV cannot embed product photos, but uses the same six informational fields as the Excel export.
+  const header=['No.','Code','Proposed size','Qty','Crystal / finish','Custom request'];
+  const body=rows.map((r,i)=>{
+    const e=r.entry;
+    return [i+1,e.code||'Custom reference pending',e.targetSize||'',e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
+  });
+  const csv=[header,...body].map(row=>row.map(value=>'"'+String(value??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
+  download(brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_Selections.csv',csv,'text/csv;charset=utf-8');
+}
+async function exportDraft(){
+  const rows=draftRows();
+  if(!rows.length){toast('Select a product first to download a draft');return;}
+  if(!window.ExcelJS){exportDraftCsv(rows);toast('Excel library unavailable; downloaded CSV draft instead');return;}
+  try{
+    const book=new ExcelJS.Workbook();
+    book.creator="L'Imperial Product Selection Studio";
+    const ws=book.addWorksheet('Draft Selections',{views:[{state:'frozen',ySplit:2}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}});
+    ws.mergeCells('A1:G1');
+    ws.getCell('A1').value="L'IMPERIAL · "+brandNow().name.toUpperCase()+" DRAFT SELECTION — NOT A PURCHASE ORDER";
+    ws.getCell('A1').font={bold:true,size:14,color:{argb:'FFFFFFFF'}};
+    ws.getCell('A1').fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF13233A'}};
+    ws.getRow(1).height=36;
+    ws.getRow(2).values=['No.','Product photo','Code','Proposed size','Qty','Crystal / finish','Custom request'];
+    ws.getRow(2).font={bold:true,color:{argb:'FF1E324D'}};
+    ws.getRow(2).height=30;
+    ws.columns=[{width:7},{width:24},{width:28},{width:26},{width:10},{width:25},{width:48}];
+    for(let n=0;n<rows.length;n++){
+      const r=rows[n],i=n+3,e=r.entry,row=ws.getRow(i);
+      row.values=[n+1,'',e.code||'Custom reference pending',e.targetSize||'',e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
+      row.height=108;
+      row.alignment={vertical:'middle',wrapText:true};
+      for(let c=1;c<=7;c++)ws.getCell(i,c).border={bottom:{style:'thin',color:{argb:'FFE5E3DF'}}};
+      try{
+        const pic=await imageFromSprite(r.item.sprite);
+        if(pic){
+          const picId=book.addImage({base64:pic,extension:'png'});
+          ws.addImage(picId,{tl:{col:1.15,row:i-1+0.05},ext:{width:122,height:122},editAs:'oneCell'});
+        }else ws.getCell(i,2).value='Photo unavailable';
+      }catch(err){ws.getCell(i,2).value='Photo unavailable'}
+    }
+    const buf=await book.xlsx.writeBuffer();
+    const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;
+    a.download=brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_Selections_'+new Date().toISOString().slice(0,10)+'.xlsx';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),15000);
+    toast('Downloaded '+rows.length+' draft selections with product photos');
+  }catch(err){
+    console.error('Draft export error',err);
+    exportDraftCsv(rows);
+    toast('Excel export failed; downloaded CSV draft instead');
+  }
+}
 function exportCsv(){const rows=orderRows(),header=['No.','Item Description','Qty','Crystal','Photo Reference','Supplier remarks'];const body=rows.map((r,i)=>[i+1,description(r),r.entry.qty,r.entry.crystal,refLabel(r),r.entry.request]);const csv=[header,...body].map(a=>a.map(x=>'"'+String(x??'').replaceAll('"','""')+'"').join(',')).join('\r\n');download(brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Supplier_Order.csv',csv,'text/csv');}
 function description(r){const e=r.entry,it=r.item;return [e.code,e.targetSize||'',e.finish?'Finishing: '+e.finish:'',e.crystal?'Crystal: '+e.crystal:'',it.spec||'',it.isCustomProposal?'CUSTOM SIZE REQUEST - confirm before manufacture':''].filter(Boolean).join('\n')}
 function refLabel(r){const it=r.item;return it.sourceRef||((it.source||'catalog')+' · page '+(it.page||'?'))}
