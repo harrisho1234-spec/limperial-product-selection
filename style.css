@@ -61,3 +61,20 @@
 .pdf-form-error{color:#9b341c;font-weight:600;margin:8px 0 12px;font-size:13px}
 .pdf-save-success{border:1px solid #bfd5c3;color:#24472e;background:#f5fbf5;border-radius:8px;padding:12px 14px;font-size:13px;font-weight:600;margin:14px 0}
 
+
+
+/* Keep the workspace navigation available when browsing long catalog lists.
+   The sidebar scrolls independently if the viewport is too short to fit it.
+   Mobile retains its existing bottom navigation. */
+@media (min-width: 901px) {
+  .sidebar {
+    position: sticky;
+    top: 68px;
+    align-self: start;
+    height: calc(100vh - 68px);
+    height: calc(100dvh - 68px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+}
