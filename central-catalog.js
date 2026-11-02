@@ -76,7 +76,11 @@
    if(loading.has(brandId))return loading.get(brandId);
    errors.delete(brandId);
    const run=fetchBrand(brandId,force).catch(err=>{
-      errors.set(brandId,String(err.message||err));
+      const reason=String(err?.message||err);
+      const friendly=reason.includes('DriveApp.getFileById')&&reason.includes('Required permissions')
+        ? 'Administrator action required: Google Drive access is not yet authorized for the shared catalog service. Ask the app owner to authorize Google Drive once in Apps Script. Staff do not need to import catalogs or change their settings.'
+        : reason;
+      errors.set(brandId,friendly);
       if(ACTIVE_BRAND_ID===brandId&&VIEW!=='team')render();
       throw err;
    }).finally(()=>{loading.delete(brandId);progress.delete(brandId)});
