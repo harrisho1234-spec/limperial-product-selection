@@ -47,7 +47,7 @@
   host.innerHTML=intro()+(error?'<p class="alert">'+escapeHtml(error)+'</p>':'')+
    '<div class="row-actions"><button class="btn secondary small" data-pdf-refresh="true">Refresh PDFs</button><span class="tiny">'+(busy?'Checking private PDF access…':loaded?current.length+' PDFs visible to your role':'Loading PDFs…')+'</span></div>'+
    '<div class="row-list">'+current.map(docItem).join('')+(loaded&&!current.length?'<div class="empty"><h3>No approved PDF catalogs</h3><p>Ask Super Admin to classify a price-free catalog as General Catalog.</p></div>':'')+'</div>'+
-   (admin()?newDocumentForm()+'<div class="candidate-row"><h3>Secure existing confidential PDF sharing</h3><p class="tiny">Existing Google Drive sharing may allow people to open a price list outside this app. Use this only after reviewing which PDFs are marked confidential; this removes access previously granted to non-Super Admin accounts, including Google Drive Editors.</p><button class="btn danger small" type="button" data-pdf-secure="true">Revoke unauthorized price-list sharing</button></div>':'');
+   (admin()?newDocumentForm()+'<div class="candidate-row"><h3>Secure existing price lists and raw catalog packs</h3><p class="tiny">Existing Google Drive shares may grant access to confidential PDFs or raw Asfour/LUMAX catalog packs outside the app. After reviewing classifications, this removes non-Super Admin shares from restricted PDFs and original master catalog packs.</p><button class="btn danger small" type="button" data-pdf-secure="true">Revoke confidential Drive sharing</button></div>':'');
  }
  async function refresh(){
   if(!authenticated()){current=[];loaded=false;render();return;}
@@ -74,11 +74,11 @@
  }
  async function secureShares(){
   if(!admin()||busy)return;
-  if(!confirm('This will revoke direct Google Drive access to ALL Confidential Price List documents for non-Super Admin accounts. Review the PDF classifications first. Continue?'))return;
+  if(!confirm('This will revoke direct Google Drive access to ALL Confidential Price List PDFs and original master catalog packs for non-Super Admin accounts, including existing Editors. Review classifications first. Continue?'))return;
   busy=true;
   try{
     const result=await api()('secureConfidentialDocs',{confirmRemoveExistingShares:true});
-    alert('Reviewed '+result.documentsChecked+' confidential PDFs. Removed '+result.revokedCount+' unauthorized Drive shares.');
+    alert('Reviewed '+result.documentsChecked+' confidential PDFs and '+result.catalogPacksChecked+' master catalog packs. Removed '+result.revokedCount+' non-Super Admin Drive shares.');
     await refresh();
   }catch(err){error='Unable to secure existing PDF shares: '+String(err.message||err);busy=false;render();}
  }
