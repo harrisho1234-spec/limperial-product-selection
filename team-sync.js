@@ -140,15 +140,23 @@ async function onCredential(credential){
   const items=[];for(const id of Object.keys(S.catalog||{}))items.push(['catalog',id]);for(const [id,e] of Object.entries(S.variants||{}))if(e.decision==='Select'||e.decision==='Approved')items.push(['variant',id]);let done=0,failed=0;
   for(const [kind,id] of items){try{const data=snapshot(kind,id);if(!data)continue;if(!hasRole()&&(data.entry.decision==='Approved'||data.entry.supplierStatus==='Confirmed')){failed++;continue}const res=await call('upsert',data);versions.set(res.recordId,res.revision);done++}catch(e){failed++;lastError=e.message}}
   await refresh();status=failed?'error':'connected';paint();alert('Published '+done+' selection(s).'+(failed?' '+failed+' could not sync; review their status or conflicts.':''))}
- function canRemoveShared(r){return !!r&&(hasRole()||String(r.ownerEmail||'').toLowerCase()===String(email||'').toLowerCase())}
+ function canRemoveShared(r){return !!r&&!r.deleted&&(hasRole()||String(r.ownerEmail||'').toLowerCase()===String(email||'').toLowerCase())}
+ const removingShared=new Set();
  async function removeShared(id){
   const r=records.find(x=>x.recordId===id&&!x.deleted);
-  if(!token||!canRemoveShared(r))return;
+  if(!token||!canRemoveShared(r)||removingShared.has(id))return;
   if(!confirm('Remove '+(r.code||r.name||'this item')+' from Team selections? This will not delete the catalog product or local selections.'))return;
+  removingShared.add(id);
+  const btn=[...document.querySelectorAll('[data-sync-action="removeShared"]')].find(el=>el.dataset.recordId===id);
+  if(btn){btn.disabled=true;btn.textContent='Removing...'}
   try{
     await call('remove',{recordId:r.recordId,expectedRevision:r.revision});
     await refresh();status='connected';lastError='';paint();
-  }catch(err){status='error';lastError='Unable to remove shared selection: '+err.message;paint();}
+  }catch(err){
+    status='error';lastError='Unable to remove shared selection: '+err.message;
+    try{await refresh()}catch(_){}
+    paint();
+  }finally{removingShared.delete(id)}
  }
  async function moderate(id,action){if(!hasRole())return;const r=records.find(x=>x.recordId===id);if(!r)return;const decision=action==='approve'?'Approved':action==='reject'?'Rejected':'Select';const supplierStatus=action==='approve'?'Confirmed':r.supplierStatus;
   try{await call('moderate',{recordId:id,expectedRevision:r.revision,decision,supplierStatus});await refresh();status='connected';lastError='';paint()}catch(err){status='error';lastError=err.message;paint()}}
