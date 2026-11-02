@@ -217,6 +217,106 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   return records.filter(r=>!r.deleted&&(teamBrandFilter==='all'||String(r.brandId)===teamBrandFilter))
     .sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
  }
+ function exportTeamRows(){
+  // Export all matching, non-deleted records (the on-screen list is capped at 200).
+  // Source data is already limited by the server to the signed-in user's access.
+  return filteredTeamRecords().map((record,index)=>{
+    const entry=record.entry||{},item=record.item||{};
+    const original=String(record.dimension||item.dimension||entry.originalSize||'').trim();
+    const requested=String(record.targetSize||entry.targetSize||'').trim();
+    const brand=brands.find(b=>b.id===record.brandId)
+      ||(typeof BRANDS!=='undefined'?BRANDS.find(b=>b.id===record.brandId):null);
+    return {
+      number:index+1,record,brand:brand?.name||record.brandId||'',
+      code:String(record.code||entry.code||item.code||''),
+      description:String(record.name||item.name||item.type||''),
+      original,requested:requested&&requested!==original?requested:'',
+      qty:record.qty??entry.qty??'',
+      finish:[record.crystal||entry.crystal,record.finish||entry.finish].filter(Boolean).join(' / '),
+      request:String(record.request||entry.request||record.notes||''),
+      decision:String(record.decision||entry.decision||''),
+      supplierStatus:String(record.supplierStatus||entry.supplierStatus||''),
+      owner:String(record.ownerEmail||''),updated:String(record.updatedAt||'')
+    };
+  });
+}
+function exportTeamCsv(items){
+  const headers=['No.','Brand','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request','Selection status','Supplier status','Submitted by','Last updated'];
+  const data=items.map(r=>[r.number,r.brand,r.code,r.description,r.original,r.requested,r.qty,r.finish,r.request,r.decision,r.supplierStatus,r.owner,r.updated]);
+  const safe=v=>{
+    let value=String(v??'');
+    // Avoid opening imported staff notes as spreadsheet formulas.
+    if(/^[\s]*[=+\-@]/.test(value))value="'"+value;
+    return '"'+value.replace(/"/g,'""')+'"';
+  };
+  const csv=[headers,...data].map(row=>row.map(safe).join(',')).join('\r\n');
+  const blob=new Blob(['\uFEFF',csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),15000);
+}
+let exportingTeamExcel=false;
+async function exportTeamExcel(){
+  if(!token||!email||!role)return alert('Sign in with Google to export authorized team selections.');
+  if(exportingTeamExcel)return;
+  const items=exportTeamRows();
+  if(!items.length)return alert('No team selections match this brand filter.');
+  exportingTeamExcel=true;
+  const button=document.querySelector('[data-sync-action="exportTeamExcel"]');
+  if(button){button.disabled=true;button.textContent='Preparing Excel…'}
+  try{
+    if(!window.ExcelJS){exportTeamCsv(items);alert('The Excel library did not load. A CSV without photos has been downloaded instead.');return}
+    const book=new window.ExcelJS.Workbook();
+    book.creator="L'Imperial Product Selection Studio";
+    const sheet=book.addWorksheet('Team Selections',{views:[{state:'frozen',ySplit:3}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}});
+    sheet.mergeCells('A1:N1');
+    const header=sheet.getCell('A1');
+    header.value="L'IMPERIAL · TEAM PRODUCT SELECTIONS · "+(teamBrandFilter==='all'?'ALL BRANDS':items[0].brand.toUpperCase());
+    header.font={bold:true,size:14,color:{argb:'FFFFFFFF'}};
+    header.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF13233A'}};
+    sheet.getRow(1).height=35;
+    sheet.mergeCells('A2:N2');
+    sheet.getCell('A2').value='Shared team review · '+items.length+' selections · Exported '+new Date().toLocaleString()+' · Not a supplier purchase order · Supplier prices excluded';
+    sheet.getCell('A2').font={italic:true,color:{argb:'FF63758B'},size:10};
+    sheet.getRow(2).height=22;
+    sheet.getRow(3).values=['No.','Product photo','Brand','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request','Selection status','Supplier status','Submitted by','Last updated'];
+    sheet.getRow(3).font={bold:true,color:{argb:'FF17304D'}};
+    sheet.getRow(3).height=28;
+    sheet.columns=[{width:7},{width:22},{width:17},{width:27},{width:35},{width:20},{width:22},{width:9},{width:23},{width:42},{width:19},{width:19},{width:30},{width:27}];
+    for(let n=0;n<items.length;n++){
+      const info=items[n],i=n+4,row=sheet.getRow(i);
+      row.values=[info.number,'',info.brand,info.code,info.description,info.original,info.requested,info.qty,info.finish,info.request,info.decision,info.supplierStatus,info.owner,info.updated];
+      row.height=83;
+      row.alignment={vertical:'middle',wrapText:true};
+      for(let col=1;col<=14;col++)sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
+      // Only a picture already available in this authorized device/brand can be embedded.
+      // Never load an original price-list PDF page or a guessed remote image.
+      const item=productFromLocal(info.record);
+      if(item?.sprite&&typeof imageFromSprite==='function'){
+        try{
+          const data=await imageFromSprite(item.sprite);
+          if(data){
+            const imageId=book.addImage({base64:data,extension:'png'});
+            sheet.addImage(imageId,{tl:{col:1.16,row:i-1+0.06},ext:{width:92,height:92},editAs:'oneCell'});
+          }else sheet.getCell(i,2).value='Photo not loaded';
+        }catch(_){sheet.getCell(i,2).value='Photo not loaded'}
+      }else sheet.getCell(i,2).value='Photo not loaded';
+    }
+    const buf=await book.xlsx.writeBuffer();
+    const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob),link=document.createElement('a');
+    link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),15000);
+  }catch(err){
+    console.error('Team Excel export failed',err);
+    try{exportTeamCsv(items);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
+  }finally{
+    exportingTeamExcel=false;
+    if(button){button.disabled=false;button.textContent='⬇ Export Excel'}
+  }
+}
  function teamBrandFilterToolbar(){
   const options=teamBrandOptions();
   const all=records.filter(r=>!r.deleted).length;
@@ -225,6 +325,7 @@ async function onCredential(credential){if(!credential?.credential)return;token=
    '<select id="liTeamBrandFilter" aria-label="Filter team selections by brand">'+
    '<option value="all"'+(teamBrandFilter==='all'?' selected':'')+'>All brands ('+all+')</option>'+
    options+'</select>'+
+   '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export Excel</button>'+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
  function rowsHTML(){const map=new Map(brands.map(b=>[b.id,b.name]));const visible=filteredTeamRecords().slice(0,200);
@@ -240,7 +341,7 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   try{localStorage.setItem(TEAM_BRAND_FILTER_KEY,teamBrandFilter)}catch(_){}
   paint();
  });
- document.addEventListener('click',e=>{const b=e.target.closest('[data-sync-action]');if(!b)return;const act=b.dataset.syncAction;if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-sync-action]');if(!b)return;const act=b.dataset.syncAction;if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel();if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
  async function publishCentralCatalog(form){if(role!=='Super Admin')return;const d=new FormData(form),brandId=String(d.get('brandId')||''),driveFile=String(d.get('driveFile')||'').trim();if(!confirm('Publish this private Drive catalog to authorized staff?'))return;try{const result=await call('publishCatalog',{brandId,driveFile,confirmUntagged:d.has('confirmUntagged')});await refresh();if(result.brandId===ACTIVE_BRAND_ID)window.LICentralCatalog?.ensureBrand(brandId,true).catch(()=>{});alert(result.itemCount+' products published for '+brandId);paint()}catch(err){alert('Catalog publishing failed: '+err.message)}}
  function init(){
