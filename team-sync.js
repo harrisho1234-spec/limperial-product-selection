@@ -218,12 +218,13 @@ async function onCredential(credential){if(!credential?.credential)return;token=
     .sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
  }
  function teamBrandFilterToolbar(){
+  const options=teamBrandOptions();
   const all=records.filter(r=>!r.deleted).length;
   const filtered=filteredTeamRecords().length;
   return '<div class="team-brand-toolbar"><label for="liTeamBrandFilter">Brand</label>'+
    '<select id="liTeamBrandFilter" aria-label="Filter team selections by brand">'+
    '<option value="all"'+(teamBrandFilter==='all'?' selected':'')+'>All brands ('+all+')</option>'+
-   teamBrandOptions()+'</select>'+
+   options+'</select>'+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
  function rowsHTML(){const map=new Map(brands.map(b=>[b.id,b.name]));const visible=filteredTeamRecords().slice(0,200);
