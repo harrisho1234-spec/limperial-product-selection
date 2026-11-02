@@ -10,7 +10,7 @@
  function isCentralPack(pack){return !!(pack&&pack.metadata?.centralManaged===true)}
  function banner(id){
    const meta=known(id),task=progress.get(id),error=errors.get(id);
-   if(!meta)return '';
+   if(!meta)return errors.get(id)?'<div class="alert">'+q(errors.get(id))+'</div>':'';
    if(!signedIn())return '<div class="alert">This supplier catalog is centrally managed. <button class="btn secondary small" data-action="goto" data-to="team">Sign in with Google</button> to view its products. Authorized staff do not need to import any files.</div>';
    if(error)return '<div class="alert">Catalog download was unsuccessful: '+q(error)+' <button class="btn secondary small" data-action="loadCentralCatalog" data-id="'+q(id)+'">Retry</button>. The local selections are preserved.</div>';
    if(task)return '<div class="alert">Loading '+q(brandNow().name)+' catalog securely from Google Drive: '+task.done+' / '+task.total+' photo sheets received. Please keep this app open.</div>';
@@ -34,14 +34,14 @@
    return loaded;
  }
  async function fetchBrand(brandId,force){
-   if(!signedIn())throw Error('Google sign-in required');
+   if(!signedIn())throw Error('Google sign-in required');const role=window.LITeamSync?.getRoles()?.role;if(role!=='Super Admin'&&!known(brandId)?.version?.endsWith('-price-safe-v1'))throw Error('Price-safe catalog protection is pending deployment. Ask Super Admin to deploy the updated Apps Script; original price sheets cannot be shown to this role.');
    const item=known(brandId);if(!item)throw Error('No published catalog for this supplier');
    const existing=DB?await tx(brandKey(brandId),null,'readonly'):null;
    if(!force && existing?.metadata?.centralVersion===item.version){readyPack(brandId,existing);return {cached:true,count:existing.catalog.items.length}}
    // Imported catalogs may have local custom products. They are merged after download.
    // If a local catalog was manually imported, leave it intact and use it until the admin
    // explicitly chooses to refresh from the central catalog.
-   if(!force && existing?.catalog?.items?.length>0&&!isCentralPack(existing)){
+   if(!force && role==='Super Admin' && existing?.catalog?.items?.length>0&&!isCentralPack(existing)){
      if(brandId===ACTIVE_BRAND_ID&&!PACK)readyPack(brandId,existing);
      return {existingLocal:true,count:existing.catalog.items.length};
    }
@@ -83,7 +83,21 @@
    loading.set(brandId,run);run.finally(()=>{if(ACTIVE_BRAND_ID===brandId&&VIEW!=='team'&&typeof render==='function')render()}).catch(()=>{});return run;
  }
  function onSignedIn(data){
-   entries.clear();for(const row of data.catalogs||[]){if(row?.brandId&&row.version)entries.set(row.brandId,row)}
+   entries.clear();const role=data?.user?.role;
+   for(const row of data.catalogs||[]){
+     if(!row?.brandId||!row.version)continue;
+     if(role!=='Super Admin'&&!String(row.version).endsWith('-price-safe-v1')){
+       errors.set(row.brandId,'Price-free catalog controls are not active on the deployed Apps Script. This role cannot download the original price-list images.');
+       continue;
+     }
+     entries.set(row.brandId,row);
+   }
+   // Never retain a previous Super Admin's visual pack in a Manager session.
+   if(role!=='Super Admin'){
+     PACK=null;ACTIVE_PACK=null;
+     Object.values(SPRITES).forEach(url=>{if(typeof url==='string'&&url.startsWith('blob:'))URL.revokeObjectURL(url)});
+     SPRITES={};
+   }
    if(known(ACTIVE_BRAND_ID))ensureBrand(ACTIVE_BRAND_ID).catch(()=>{});
  }
  function onSignedOut(){entries.clear();errors.clear();progress.clear();
