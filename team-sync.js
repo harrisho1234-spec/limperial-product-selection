@@ -6,7 +6,7 @@
  const DEFAULT_CONFIG={scriptUrl:'https://script.google.com/macros/s/AKfycbzlXPtmjhHpTot4R0ItabhBOQBrNamB2TUegdq6Lde-uX930U1hIohNqRsvUzMW5LYc1g/exec',clientId:'97172665640-k7lq4tqtl8jl3udei8f4f7tml8agfil4.apps.googleusercontent.com'};let config={...DEFAULT_CONFIG};try{config={...DEFAULT_CONFIG,...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch(_){config={...DEFAULT_CONFIG}}
  let iframe=null,bridgePopup=null,bridgePeer=null,bridgeOrigin='',bridgeNonce='',bridgeMode='iframe',signInStarted=false,ready=false,token='',email='',role='',displayName='';
  let records=[],brands=[],users=[],lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false;
- const versions=new Map();let gsiLoaded=false,gsiClient='',callbacks=null,interval=null;
+ const versions=new Map();let gsiLoaded=false,gsiClient='',callbacks=null,interval=null,oneTapOffered=false,credentialInFlight=false;
  const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
  function self(){return {email,role,name:displayName}}
  function hasRole(){return ['Super Admin','Admin','Manager'].includes(role)}
@@ -42,10 +42,31 @@
    bridgePeer.postMessage({kind:'LI_SYNC_REQUEST',liNonce:bridgeNonce,id,token,op,payload},bridgeOrigin);
   })}
  function loadGsi(){return new Promise((resolve,reject)=>{if(window.google?.accounts?.id){gsiLoaded=true;resolve();return}let s=document.getElementById('liGoogleIdentity');if(!s){s=document.createElement('script');s.src='https://accounts.google.com/gsi/client';s.async=true;s.id='liGoogleIdentity';document.head.appendChild(s)}const check=()=>{if(window.google?.accounts?.id){gsiLoaded=true;resolve()}else reject(Error('Google Sign-In did not load. Check your connection.'))};s.addEventListener('load',check,{once:true});s.addEventListener('error',()=>reject(Error('Cannot load Google Sign-In')),{once:true})})}
- function showGoogleButton(force=false){
+ function initializeGoogleIdentity(){
+  if(!window.google?.accounts?.id||!settingsValid())return false;
+  if(gsiClient!==config.clientId){
+    google.accounts.id.initialize({
+      client_id:config.clientId,
+      callback:credential=>onCredential(credential),
+      auto_select:true
+    });
+    gsiClient=config.clientId;
+  }
+  return true;
+}
+function offerReturningGoogleSignIn(){
+  // Google, not localStorage, owns the remembered account and its consent.
+  // One Tap may require a click or be unavailable because of browser settings.
+  if(oneTapOffered||token||!initializeGoogleIdentity())return;
+  oneTapOffered=true;
+  try{google.accounts.id.prompt()}catch(err){
+    console.warn('Automatic Google sign-in not available; manual button remains',err);
+  }
+}
+function showGoogleButton(force=false){
   const slot=document.getElementById('liGoogleSignIn');
   if(!slot||!window.google?.accounts?.id||!settingsValid())return false;
-  if(gsiClient!==config.clientId){google.accounts.id.initialize({client_id:config.clientId,callback:credential=>onCredential(credential)});gsiClient=config.clientId}
+  initializeGoogleIdentity();
   if(force||slot.dataset.liClientId!==config.clientId||!slot.querySelector('iframe')){
     slot.innerHTML='';google.accounts.id.renderButton(slot,{type:'standard',shape:'pill',theme:'outline',text:'signin_with',size:'large',width:260});
     slot.dataset.liClientId=config.clientId;
@@ -62,6 +83,7 @@ async function connectButton(force=false){
   try{
     await loadGsi();
     if(!showGoogleButton(force))throw Error('Could not display Google Sign-In. Refresh the Team selections page.');
+    offerReturningGoogleSignIn();
     signInStarted=true;
     paintStatusOnly();
     // The sign-in button does not depend on the private Apps Script iframe.
@@ -79,8 +101,28 @@ function paintStatusOnly(){
   if(t)t.textContent=token?(email?'Signed in as '+email+' · '+role:'Verifying Google sign-in…'):
     ready?'Google connection ready. Sign in to share selections.':'Sign in with Google to access team selections';
 }
-async function onCredential(credential){token=credential.credential||'';status='connecting';lastError='';paintStatusOnly();try{await refresh();status='connected';lastError='';paint();if(!interval)interval=setInterval(()=>{if(token&&document.visibilityState!=='hidden')refresh().catch(e=>{status='error';lastError=e.message;paint()})},45000)}catch(err){status='error';lastError=err.message;token='';paint()}}
- function disconnect(keepConfig=true){window.LICentralCatalog?.onSignedOut();token='';email='';role='';displayName='';records=[];brands=[];users=[];versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';paint()}
+async function onCredential(credential){
+  if(credentialInFlight||!credential?.credential)return;
+  credentialInFlight=true;
+  token=credential.credential;
+  status='connecting';lastError='';paintStatusOnly();
+  try{
+    await refresh();
+    status='connected';lastError='';paint();
+    if(!interval)interval=setInterval(()=>{
+      if(token&&document.visibilityState!=='hidden')refresh().catch(e=>{status='error';lastError=e.message;paint()});
+    },45000);
+  }catch(err){
+    status='error';
+    lastError='Google recognized your account, but Team selections could not authorize it: '+err.message;
+    token='';email='';role='';displayName='';paint();
+  }finally{credentialInFlight=false}
+}
+ function disconnect(keepConfig=true,explicitSignOut=false){
+  if(explicitSignOut&&window.google?.accounts?.id){
+    try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
+  }
+  window.LICentralCatalog?.onSignedOut();token='';email='';role='';displayName='';records=[];brands=[];users=[];versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';paint()}
  async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=data.selections||[];brands=data.brands||[];users=data.users||[];window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
   // Create lightweight brand records for shared suppliers without overwriting local private catalogs.
   const existing=new Set(BRANDS.map(x=>x.id));let changed=false;for(const b of brands){if(!existing.has(b.id)){BRANDS.push({id:b.id,name:b.name,category:b.category||'Other',shared:true});changed=true}}if(changed)persistBrandDirectory();
@@ -120,9 +162,17 @@ async function onCredential(credential){token=credential.credential||'';status='
   root.innerHTML=`<div class="candidate-row"><div class="variant-top"><div><h2>Shared Team Selections</h2><p class="tiny" id="teamSyncNotice">${esc(status==='connected'?'Signed in as '+email+' · '+role:'Sign in with Google to access team selections')}</p>${lastError?`<p class="alert">${esc(lastError)}</p>${!token?'<div class="row-actions"><button class="btn secondary small" data-sync-action="openBridgePopup">Open secure Google connection window</button><a class="btn quiet small" href="'+esc(config.scriptUrl)+'" target="_blank" rel="noopener">Check deployed Web App URL</a></div>':''}`:''}</div><div class="row-actions">${role==='Super Admin'?'<button class="btn quiet small" data-sync-action="reconfigure">Connection settings</button>':''}${token?'<button class="btn quiet small" data-sync-action="signout">Sign out</button>':''}</div></div>${!token?'<div id="liGoogleSignIn" style="min-height:50px;margin:12px 0"></div><p id="teamSyncConnectError" class="alert" hidden></p><div class="row-actions"><button class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button><button class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button></div>':`<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button><button class="btn small" data-sync-action="publish">Share my current ${esc(brandNow().name)} selections</button><span class="tiny">Last refreshed: ${esc(lastFetched||'—')} · ${records.length} records</span></div>`}<p class="tiny">Approved staff can browse private supplier catalogs after Google sign-in. New selections and edits sync while signed in; previously saved local drafts are not bulk-published automatically.</p></div>${token?`<div class="subheading"><h2>Team review</h2><span class="tiny">All brands · authorized users only</span></div><div class="row-list">${rowsHTML()}</div>${adminCatalogForm()}${role==='Super Admin'?`<div class="candidate-row"><h3>Manage team access</h3><form id="liTeamAddUser"><div class="variant-fields"><div class="field"><label>Staff email</label><input type="email" name="email" required></div><div class="field"><label>Display name</label><input name="name"></div><div class="field"><label>Role</label><select name="role"><option>Staff</option><option>Manager</option><option>Admin</option><option>Super Admin</option></select></div></div><div class="row-actions"><button class="btn" type="submit">Authorize staff</button></div></form><p class="tiny">Only Super Admin can manage user access. Existing: ${users.length} users.</p></div>`:''}`:''}`;
   if(!token){const slot=document.getElementById('liGoogleSignIn');if(slot)slot.insertAdjacentHTML('afterend',repairClientMarkup());showGoogleButton();if(!signInStarted&&status!=='error'){signInStarted=true;connectButton().catch(e=>{status='error';lastError=e.message;paint()})}}}
  document.addEventListener('submit',e=>{if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target)}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
- document.addEventListener('click',e=>{const b=e.target.closest('[data-sync-action]');if(!b)return;const act=b.dataset.syncAction;if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';paint()}).catch(err=>{status='error';lastError=err.message;paint()});if(act==='publish')publishCurrent();if(act==='import')importShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect();paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-sync-action]');if(!b)return;const act=b.dataset.syncAction;if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';paint()}).catch(err=>{status='error';lastError=err.message;paint()});if(act==='publish')publishCurrent();if(act==='import')importShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
  async function publishCentralCatalog(form){if(role!=='Super Admin')return;const d=new FormData(form),brandId=String(d.get('brandId')||''),driveFile=String(d.get('driveFile')||'').trim();if(!confirm('Publish this private Drive catalog to authorized staff?'))return;try{const result=await call('publishCatalog',{brandId,driveFile,confirmUntagged:d.has('confirmUntagged')});await refresh();if(result.brandId===ACTIVE_BRAND_ID)window.LICentralCatalog?.ensureBrand(brandId,true).catch(()=>{});alert(result.itemCount+' products published for '+brandId);paint()}catch(err){alert('Catalog publishing failed: '+err.message)}}
- function init(){/* Does not require connectivity until Team tab is opened. */}
+ function init(){
+  // Ask Google to restore an authorized account once per app load. No token is
+  // saved to localStorage, and a manual button remains when auto sign-in fails.
+  if(!settingsValid())return;
+  loadGsi().then(()=>{
+    initializeGoogleIdentity();
+    offerReturningGoogleSignIn();
+  }).catch(err=>console.warn('Google auto sign-in unavailable',err));
+}
  window.LITeamSync={init,render,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),refresh,disconnect,request:call};
 })();
