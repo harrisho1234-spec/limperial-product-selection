@@ -63,19 +63,31 @@
 
 
 
-/* Keep the workspace navigation available when browsing long catalog lists.
-   The sidebar scrolls independently if the viewport is too short to fit it.
-   Mobile retains its existing bottom navigation. */
+/* Desktop: keep the entire left navigation fixed beneath the fixed-height header.
+   The document/product content scrolls behind its own right-hand column.
+   Do not change the <=900px bottom navigation behaviour. */
 @media (min-width: 901px) {
+  .layout {
+    display: block;
+    padding-left: 215px;
+  }
   .sidebar {
-    position: sticky;
+    position: fixed;
     top: 68px;
-    align-self: start;
+    left: 0;
+    bottom: 0;
+    z-index: 14;
+    width: 215px;
     height: calc(100vh - 68px);
     height: calc(100dvh - 68px);
     overflow-y: auto;
     overscroll-behavior: contain;
     scrollbar-width: thin;
+  }
+  .layout > main {
+    display: block;
+    width: 100%;
+    min-width: 0;
   }
 }
 
