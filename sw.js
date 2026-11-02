@@ -1,4 +1,4 @@
-const CACHE='limperial-selection-shell-v34';
+const CACHE='limperial-selection-shell-v35';
 const FILES=['./','./index.html','./catalog-split.js','./brand-library.js','./central-catalog.js','./team-sync.js','./pdf-access.js','./app.js','./style.css','./manifest.webmanifest','./favicon.ico','./favicon-32.png','./favicon-48.png','./icon-192.png','./icon-512.png','./icon-maskable-512.png','./apple-touch-icon.png'];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(FILES)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(Promise.all([
