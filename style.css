@@ -93,3 +93,11 @@
 
 /* Keep duplicated catalog selections distinct from the standard-size entry. */
 .selection-copy-marker{display:inline-block;margin-top:6px;padding:4px 8px;border-radius:6px;background:#fff3df;color:#825a21;font-weight:700}
+
+
+/* Shared Team selections: supplier brand filter. */
+.team-brand-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 16px}
+.team-brand-toolbar label{font-size:12px;font-weight:700;color:#344861}
+.team-brand-toolbar select{min-width:190px;max-width:320px;padding:10px 12px;background:#fff;border:1px solid var(--line);border-radius:9px;color:var(--ink)}
+.team-brand-toolbar .tiny{margin-left:auto}
+@media(max-width:600px){.team-brand-toolbar select{flex:1;min-width:150px;max-width:none}.team-brand-toolbar .tiny{width:100%;margin-left:0}}
