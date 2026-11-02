@@ -46,7 +46,7 @@
 .split-layout-tools .btn{font-size:11px}
 
 /* Keep the catalog viewport anchored on existing products while additional cards append below. */
-.catalog-more{overflow-anchor:none}
+.cards,.catalog-more{overflow-anchor:none}
 
 /* Shared catalogs are downloaded automatically after authorized Google sign-in. */
 #centralCatalogProgress{font-weight:600;font-size:12px}
