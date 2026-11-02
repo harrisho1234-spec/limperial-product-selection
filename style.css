@@ -50,3 +50,9 @@
 
 /* Shared catalogs are downloaded automatically after authorized Google sign-in. */
 #centralCatalogProgress{font-weight:600;font-size:12px}
+
+/* Supplier PDF access classification */
+.pdf-admin-details{margin-top:10px;padding-top:9px;border-top:1px solid #e6e3de}
+.pdf-admin-details summary{cursor:pointer;font-weight:600;font-size:12px}
+.pdf-doc-form{margin-top:12px}
+.pdf-doc-form .variant-fields{margin-bottom:12px}
