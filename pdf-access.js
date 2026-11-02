@@ -47,7 +47,7 @@
   host.innerHTML=intro()+(error?'<p class="alert">'+escapeHtml(error)+'</p>':'')+
    '<div class="row-actions"><button class="btn secondary small" data-pdf-refresh="true">Refresh PDFs</button><span class="tiny">'+(busy?'Checking private PDF access…':loaded?current.length+' PDFs visible to your role':'Loading PDFs…')+'</span></div>'+
    '<div class="row-list">'+current.map(docItem).join('')+(loaded&&!current.length?'<div class="empty"><h3>No approved PDF catalogs</h3><p>Ask Super Admin to classify a price-free catalog as General Catalog.</p></div>':'')+'</div>'+
-   (admin()?newDocumentForm():'');
+   (admin()?newDocumentForm()+'<div class="candidate-row"><h3>Secure existing confidential PDF sharing</h3><p class="tiny">Existing Google Drive sharing may allow people to open a price list outside this app. Use this only after reviewing which PDFs are marked confidential; this removes access previously granted to non-Super Admin accounts, including Google Drive Editors.</p><button class="btn danger small" type="button" data-pdf-secure="true">Revoke unauthorized price-list sharing</button></div>':'');
  }
  async function refresh(){
   if(!authenticated()){current=[];loaded=false;render();return;}
@@ -72,6 +72,16 @@
    else {error='Your browser blocked the PDF window. Enable pop-ups for this app and retry.';render();}
   }catch(err){if(popup)popup.close();error='Cannot open PDF: '+String(err.message||err);render();}
  }
+ async function secureShares(){
+  if(!admin()||busy)return;
+  if(!confirm('This will revoke direct Google Drive access to ALL Confidential Price List documents for non-Super Admin accounts. Review the PDF classifications first. Continue?'))return;
+  busy=true;
+  try{
+    const result=await api()('secureConfidentialDocs',{confirmRemoveExistingShares:true});
+    alert('Reviewed '+result.documentsChecked+' confidential PDFs. Removed '+result.revokedCount+' unauthorized Drive shares.');
+    await refresh();
+  }catch(err){error='Unable to secure existing PDF shares: '+String(err.message||err);busy=false;render();}
+ }
  function parsedFileId(raw){
   const text=String(raw||'').trim(),match=text.match(/\/file\/d\/([-_A-Za-z0-9]{20,})/);
   return match?match[1]:text;
@@ -90,8 +100,8 @@
   }catch(err){error='Could not update document access: '+String(err.message||err);busy=false;render()}
  }
  document.addEventListener('click',e=>{
-  const b=e.target.closest('[data-pdf-refresh],[data-pdf-open]');if(!b||typeof VIEW==='undefined'||VIEW!=='documents')return;
-  if(b.hasAttribute('data-pdf-refresh')){refresh();return;}
+  const b=e.target.closest('[data-pdf-refresh],[data-pdf-open],[data-pdf-secure]');if(!b||typeof VIEW==='undefined'||VIEW!=='documents')return;
+  if(b.hasAttribute('data-pdf-refresh')){refresh();return;}if(b.hasAttribute('data-pdf-secure')){secureShares();return;}
   if(b.hasAttribute('data-pdf-open'))openDocument(b.dataset.brand,b.dataset.title);
  });
  document.addEventListener('submit',e=>{
