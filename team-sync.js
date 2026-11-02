@@ -135,10 +135,10 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   // Create lightweight brand records for shared suppliers without overwriting local private catalogs.
   const existing=new Set(BRANDS.map(x=>x.id));let changed=false;for(const b of brands){if(!existing.has(b.id)){BRANDS.push({id:b.id,name:b.name,category:b.category||'Other',shared:true});changed=true}}if(changed)persistBrandDirectory();
   return data}
- function productFromLocal(r){if(typeof PACK==='undefined'||!PACK||r.brandId!==ACTIVE_BRAND_ID)return null;if(r.kind==='catalog')return PACK.items.find(x=>x.id===r.itemId)||null;return allVariants().find(x=>x.id===r.itemId)||null}
+ function productFromLocal(r){if(typeof PACK==='undefined'||!PACK||r.brandId!==ACTIVE_BRAND_ID)return null;if(r.kind==='catalog')return catalogItemForSelection(r.itemId)||null;return allVariants().find(x=>x.id===r.itemId)||null}
  function recordId(kind,id){return email+'|'+ACTIVE_BRAND_ID+'|'+kind+'|'+id}
- function snapshot(kind,id){if(!PACK)return null;const item=kind==='catalog'?PACK.items.find(x=>x.id===id):allVariants().find(x=>x.id===id);if(!item)return null;const entry=kind==='catalog'?candidateEntry(item):variantEntry(item);
-  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,code:item.code||'',name:item.name||item.type||'',type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',page:item.page||null,photoRef:item.sourceRef||(item.sprite?.atlas?item.sprite.atlas+'#'+item.sprite.index:'')},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
+ function snapshot(kind,id){if(!PACK)return null;const item=kind==='catalog'?catalogItemForSelection(id):allVariants().find(x=>x.id===id);if(!item)return null;const entry=kind==='catalog'?candidateEntry(item):variantEntry(item);
+  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,code:item.code||'',name:item.name||item.type||'',type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:item.sourceRef||(item.sprite?.atlas?item.sprite.atlas+'#'+item.sprite.index:'')},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
  async function publish(kind,id){if(!token||!email)return;const data=snapshot(kind,id);if(!data)return;if(!hasRole()&&(data.entry.decision==='Approved'||data.entry.supplierStatus==='Confirmed')){lastError='Only management can approve or confirm products for the team.';status='error';paint();return}
   pending++;try{const response=await call('upsert',data);versions.set(response.recordId,response.revision);status='connected';lastError='';await refresh();paint()}catch(err){status='error';lastError=err.message+' — local copy preserved';paint()}finally{pending--}}
  function itemChanged(kind,id){if(!token)return;publish(kind,id).catch(err=>{lastError=err.message;status='error';paint()})}
@@ -170,9 +170,23 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   try{await call('moderate',{recordId:id,expectedRevision:r.revision,decision,supplierStatus});await refresh();status='connected';lastError='';paint()}catch(err){status='error';lastError=err.message;paint()}}
  async function addUser(form){const data=new FormData(form);try{await call('setUser',{email:String(data.get('email')||''),name:String(data.get('name')||''),role:String(data.get('role')||'Staff'),active:true});await refresh();paint();alert('Staff access updated')}catch(e){status='error';lastError=e.message;paint()}}
  async function brandCreated(brand){if(!token)return;try{await call('brand',{brand:{id:brand.id,name:brand.name,category:brand.category}});await refresh()}catch(err){status='error';lastError='Brand created only locally: '+err.message;paint()}}
- async function importShared(recordId){const record=records.find(r=>r.recordId===recordId);if(!record)return alert('Shared selection not found');
+ async function importShared(recordId){
+  const record=records.find(r=>r.recordId===recordId);
+  if(!record)return alert('Shared selection not found');
   if(record.brandId!==ACTIVE_BRAND_ID){alert('First open the '+(brands.find(b=>b.id===record.brandId)?.name||record.brandId)+' brand in Brands, then import this selection.');return}
-  if(!PACK){alert('Import the private catalog pack for this brand first, then try again.');return}
+  if(!PACK){alert('The supplier catalog has not loaded yet. Try again after signing in.');return}
+  const duplicate=String(record.itemId||'').startsWith('copy-');
+  if(duplicate){
+    const source=PACK.items.find(x=>x.id===(record.entry?.sourceItemId||record.item?.sourceItemId))
+       ||PACK.items.find(x=>x.code&&x.code===record.code);
+    if(!source)return alert('This selection uses a catalog item that is not available in your current catalog. Ask Super Admin to publish the source product first.');
+    if(!S.catalogDuplicates)S.catalogDuplicates={};
+    const newKey=S.catalogDuplicates[record.itemId]&&S.catalogDuplicates[record.itemId].sourceItemId!==source.id
+      ?'copy-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9):record.itemId;
+    if(S.catalogDuplicates[newKey]&&!confirm('Replace your existing duplicate details for '+(source.code||source.name)+'?'))return;
+    S.catalogDuplicates[newKey]={...(record.entry||{}),sourceItemId:source.id,code:record.code,decision:record.decision,supplierStatus:record.supplierStatus,qty:record.qty};
+    save();alert('Copied this separate size version to My selections. Other versions remain unchanged.');setView('selected');return;
+  }
   let item=PACK.items.find(x=>x.id===record.itemId)||PACK.items.find(x=>x.code&&x.code===record.code);
   if(!item){item={id:ACTIVE_BRAND_ID+'-team-'+record.itemId,code:record.code,name:record.name,type:record.type||'Catalog item',dimension:record.dimension,source:'team',page:record.item?.page||null,sprite:null,photoKind:'missing-photo',verification:'Team record; verify exact supplier photo and code'};
     PACK.items.push(item);PACK.sources.team=PACK.sources.team||{name:'Team shared selections',kind:'shared',productRows:0};PACK.sources.team.productRows++;
@@ -180,7 +194,8 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   if(S.catalog[item.id]&&!confirm('Replace your local selection details for '+(item.code||item.name)+' with this team record?'))return;
   S.catalog[item.id]=Object.assign({},record.entry||{},{code:record.code,decision:record.decision,supplierStatus:record.supplierStatus,qty:record.qty});
   if(!S.shortlist.includes(item.id))S.shortlist.push(item.id);
-  save();alert('Selection copied to this brand on your computer. It now appears in My selections and can be used in order preparation.');setView('selected')}
+  save();alert('Selection copied to this brand on your computer. It now appears in My selections and can be used in order preparation.');setView('selected')
+ }
  function rowsHTML(){const map=new Map(brands.map(b=>[b.id,b.name]));const visible=records.filter(r=>!r.deleted).sort((a,b)=>String(b.updatedAt).localeCompare(String(a.updatedAt))).slice(0,200);
   return visible.map(r=>{const item=productFromLocal(r);const img=item&&typeof photo==='function'?photo(item.sprite,'selection-thumb'):'<div class="team-photo-placeholder">📦<small>Photo on catalog device</small></div>';return `<article class="candidate-row team-selection-row"><div class="selection-card-head">${img}<div class="selection-card-copy"><div class="tiny">${esc(map.get(r.brandId)||r.brandId)} · ${esc(r.kind)}</div><strong>${esc(r.code||r.itemId)}</strong><div>${esc(r.name||r.item?.name||'Product')}</div><div class="tiny">${esc(r.dimension||'')} · ${esc(r.ownerEmail)}</div><div class="tiny">${esc(r.updatedAt)} · Revision ${r.revision}</div></div></div><div class="team-tags"><span class="pill ${r.decision==='Approved'?'green':'gold'}">${esc(r.decision)}</span><span class="pill">${esc(r.supplierStatus)}</span><span class="tiny">Qty ${esc(r.qty)}</span></div><div class="tiny">${esc(r.notes||'')}</div>${r.brandId===ACTIVE_BRAND_ID?`<div class="row-actions"><button class="btn quiet small" data-sync-action="import" data-record-id="${esc(r.recordId)}">Use in this brand's selections</button></div>`:''}${hasRole()&&r.decision!=='Approved'&&r.decision!=='Rejected'?`<div class="row-actions"><button class="btn small" data-sync-action="approve" data-record-id="${esc(r.recordId)}">Approve & confirm</button><button class="btn danger small" data-sync-action="reject" data-record-id="${esc(r.recordId)}">Reject</button></div>`:''}${canRemoveShared(r)?`<div class="row-actions"><button type="button" class="btn danger small" data-sync-action="removeShared" data-record-id="${esc(r.recordId)}">Remove from Team selections</button></div>`:''}</article>`}).join('')||'<div class="empty"><h3>No shared selections yet</h3><p>Select products in the app and publish them to your team.</p></div>'}
  function render(){const root=document.getElementById('app');if(!root)return;
