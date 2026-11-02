@@ -21,7 +21,7 @@
    '<div class="variant-fields"><div class="field"><label>PDF Access Type</label><select name="accessType"><option'+(general?'':' selected')+'>Confidential Price List</option><option'+(general?' selected':'')+'>General Catalog</option></select></div>'+
    '<div class="field"><label>Allow regular Staff to view too? (Managers are allowed automatically)</label><select name="allowStaff"><option value="false">No</option><option value="true"'+(d.allowStaff?' selected':'')+'>Yes</option></select></div></div>'+
    '<p class="alert"><b>To allow Manager access:</b> Choose <b>General Catalog</b>, review the entire PDF, tick the confirmation below, then click <b>Save access type</b>. Keep Staff = No if only Managers should see it.</p>'+'<label class="pdf-review-check"><input type="checkbox" name="verifiedPriceFree" value="yes"> <b>I checked every page and confirm this PDF contains no supplier prices, cost figures, or confidential information.</b></label>'+
-   '<div class="row-actions"><button class="btn secondary small" type="submit">Save access type</button></div></form></details>';
+   '<p class="pdf-form-error" role="alert" hidden></p><div class="row-actions"><button class="btn secondary small" type="submit">Save access type</button></div></form></details>';
  };
  function docItem(d){
   const confidential=d.accessType!=='General Catalog';
@@ -39,7 +39,7 @@
    '<div class="field"><label>PDF Access Type</label><select name="accessType"><option>Confidential Price List</option><option>General Catalog</option></select></div>'+
    '<div class="field"><label>Allow regular Staff too? (Managers have automatic access)</label><select name="allowStaff"><option value="false">No</option><option value="true">Yes</option></select></div></div>'+
    '<p class="tiny">Only Super Admin can approve a price-free catalog. General Catalog automatically allows Manager access; choose Staff = Yes only when regular staff should also see it.</p>'+'<label class="pdf-review-check"><input type="checkbox" name="verifiedPriceFree" value="yes"> <b>I reviewed every page and confirmed this document is price-free.</b></label>'+
-   '<div class="row-actions"><button class="btn small" type="submit">Add PDF to register</button></div></form></div>';
+   '<p class="pdf-form-error" role="alert" hidden></p><div class="row-actions"><button class="btn small" type="submit">Add PDF to register</button></div></form></div>';
  }
  function render(){
   const host=document.getElementById('app');if(!host)return;
@@ -94,11 +94,9 @@
   const fileId=parsedFileId(d.get('fileId'));
   const allowStaff=d.get('allowStaff')==='true';
   if(type==='General Catalog'&&!d.has('verifiedPriceFree')){
-   success='';
-   error='To enable General Catalog, first review the PDF, tick the "I checked every page" checkbox, and click Save access type again. Nothing has been changed.';
-   render();
-   const warning=document.querySelector('.pdf-save-success,.alert');
-   warning?.scrollIntoView?.({block:'nearest',behavior:'instant'});
+   const warning=form.querySelector('.pdf-form-error');
+   if(warning){warning.hidden=false;warning.textContent='Before saving: review the complete PDF and tick the price-free confirmation. Your General Catalog selection has been kept.'}
+   form.querySelector('[name="verifiedPriceFree"]')?.focus();
    return;
   }
   if(!confirm(type==='General Catalog'?
