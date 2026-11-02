@@ -4,7 +4,7 @@
 'use strict';
 (function(){
  const escapeHtml=v=>String(v??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
- let current=[],busy=false,error='',loaded=false;
+ let current=[],busy=false,error='',success='',loaded=false;
  const role=()=>window.LITeamSync?.getRoles()?.role||'';
  const authenticated=()=>!!window.LITeamSync?.status()?.connected;
  const admin=()=>role()==='Super Admin';
@@ -19,8 +19,8 @@
   return '<details class="pdf-admin-details"><summary>Edit access</summary><form class="pdf-doc-form" data-doc-edit="true">'+
    '<input type="hidden" name="brandId" value="'+escapeHtml(d.brandId)+'"><input type="hidden" name="title" value="'+title+'"><input type="hidden" name="fileId" value="'+escapeHtml(d.fileId)+'">'+
    '<div class="variant-fields"><div class="field"><label>PDF Access Type</label><select name="accessType"><option'+(general?'':' selected')+'>Confidential Price List</option><option'+(general?' selected':'')+'>General Catalog</option></select></div>'+
-   '<div class="field"><label>Staff can view General Catalog</label><select name="allowStaff"><option value="false">No</option><option value="true"'+(d.allowStaff?' selected':'')+'>Yes</option></select></div></div>'+
-   '<label class="tiny"><input type="checkbox" name="verifiedPriceFree" value="yes"> I have reviewed every page and confirmed there are no supplier prices, cost figures, or confidential information (required for General Catalog)</label>'+
+   '<div class="field"><label>Allow regular Staff to view too? (Managers are allowed automatically)</label><select name="allowStaff"><option value="false">No</option><option value="true"'+(d.allowStaff?' selected':'')+'>Yes</option></select></div></div>'+
+   '<p class="alert"><b>To allow Manager access:</b> Choose <b>General Catalog</b>, review the entire PDF, tick the confirmation below, then click <b>Save access type</b>. Keep Staff = No if only Managers should see it.</p>'+'<label class="pdf-review-check"><input type="checkbox" name="verifiedPriceFree" value="yes"> <b>I checked every page and confirm this PDF contains no supplier prices, cost figures, or confidential information.</b></label>'+
    '<div class="row-actions"><button class="btn secondary small" type="submit">Save access type</button></div></form></details>';
  };
  function docItem(d){
@@ -37,14 +37,14 @@
    '<div class="field"><label>Document title</label>'+input('title')+'</div>'+
    '<div class="field span2"><label>Private Google Drive PDF ID or file link</label>'+input('fileId')+'</div>'+
    '<div class="field"><label>PDF Access Type</label><select name="accessType"><option>Confidential Price List</option><option>General Catalog</option></select></div>'+
-   '<div class="field"><label>Allow Staff to view General Catalog</label><select name="allowStaff"><option value="false">No</option><option value="true">Yes</option></select></div></div>'+
-   '<label class="tiny"><input type="checkbox" name="verifiedPriceFree" value="yes"> I reviewed every page and confirmed this PDF is price-free (required for General Catalog)</label>'+
+   '<div class="field"><label>Allow regular Staff too? (Managers have automatic access)</label><select name="allowStaff"><option value="false">No</option><option value="true">Yes</option></select></div></div>'+
+   '<p class="tiny">Only Super Admin can approve a price-free catalog. General Catalog automatically allows Manager access; choose Staff = Yes only when regular staff should also see it.</p>'+'<label class="pdf-review-check"><input type="checkbox" name="verifiedPriceFree" value="yes"> <b>I reviewed every page and confirmed this document is price-free.</b></label>'+
    '<div class="row-actions"><button class="btn small" type="submit">Add PDF to register</button></div></form></div>';
  }
  function render(){
   const host=document.getElementById('app');if(!host)return;
   if(!authenticated()){host.innerHTML=intro();return;}
-  host.innerHTML=intro()+(error?'<p class="alert">'+escapeHtml(error)+'</p>':'')+
+  host.innerHTML=intro()+(error?'<p class="alert"><b>Permission not saved:</b> '+escapeHtml(error)+'</p>':'')+(success?'<p class="pdf-save-success" role="status">'+escapeHtml(success)+'</p>':'')+
    '<div class="row-actions"><button class="btn secondary small" data-pdf-refresh="true">Refresh PDFs</button><span class="tiny">'+(busy?'Checking private PDF access…':loaded?current.length+' PDFs visible to your role':'Loading PDFs…')+'</span></div>'+
    '<div class="row-list">'+current.map(docItem).join('')+(loaded&&!current.length?'<div class="empty"><h3>No approved PDF catalogs</h3><p>Ask Super Admin to classify a price-free catalog as General Catalog.</p></div>':'')+'</div>'+
    (admin()?newDocumentForm()+'<div class="candidate-row"><h3>Secure existing price lists and raw catalog packs</h3><p class="tiny">Existing Google Drive shares may grant access to confidential PDFs or raw Asfour/LUMAX catalog packs outside the app. After reviewing classifications, this removes non-Super Admin shares from restricted PDFs and original master catalog packs.</p><button class="btn danger small" type="button" data-pdf-secure="true">Revoke confidential Drive sharing</button></div>':'');
@@ -89,15 +89,43 @@
  async function saveDocument(form){
   if(!admin()||busy)return;
   const d=new FormData(form),type=String(d.get('accessType')||'');
+  const brandId=String(d.get('brandId')||'').trim().toLowerCase();
+  const title=String(d.get('title')||'').trim();
+  const fileId=parsedFileId(d.get('fileId'));
+  const allowStaff=d.get('allowStaff')==='true';
   if(type==='General Catalog'&&!d.has('verifiedPriceFree')){
-   alert('Review the complete PDF for prices, then check the verification box before allowing Manager access.');return;
+   success='';
+   error='To enable General Catalog, first review the PDF, tick the "I checked every page" checkbox, and click Save access type again. Nothing has been changed.';
+   render();
+   const warning=document.querySelector('.pdf-save-success,.alert');
+   warning?.scrollIntoView?.({block:'nearest',behavior:'instant'});
+   return;
   }
-  if(!confirm('Save this PDF classification? General Catalogs can be viewed by authorized Managers.'))return;
-  busy=true;
+  if(!confirm(type==='General Catalog'?
+     'Confirm the entire PDF has no supplier prices or confidential figures. Managers will then be allowed to open it. Continue?':
+     'Restrict this PDF to Super Admin only? Any app-granted document access will be revoked. Continue?'))return;
+  busy=true;error='';success='';
+  const submit=form.querySelector('button[type="submit"]');
+  if(submit){submit.disabled=true;submit.textContent='Saving permissions…'}
   try{
-   await api()('upsertDoc',{brandId:String(d.get('brandId')),title:String(d.get('title')),fileId:parsedFileId(d.get('fileId')),accessType:type,allowStaff:d.get('allowStaff')==='true',verifiedPriceFree:d.has('verifiedPriceFree')});
+   const saved=await api()('upsertDoc',{brandId,title,fileId,accessType:type,allowStaff,verifiedPriceFree:d.has('verifiedPriceFree')});
+   if(!saved||saved.accessType!==type||saved.brandId!==brandId||saved.title!==title)
+     throw Error('Server did not confirm the requested access type');
    await refresh();
-  }catch(err){error='Could not update document access: '+String(err.message||err);busy=false;render()}
+   const updated=current.find(x=>x.brandId===brandId&&x.title===title);
+   if(!updated||updated.accessType!==type||updated.allowStaff!==(type==='General Catalog'&&allowStaff))
+     throw Error('The server returned the previous access type. Check the deployed Apps Script version, then refresh.');
+   error='';
+   success=title+' saved as '+type+'. '+(type==='General Catalog'?
+     'Managers can now open this PDF.'+(allowStaff?' Regular Staff can view it too.':' Regular Staff remain restricted.'):
+     'Only Super Admin can open it through this app.');
+  }catch(err){
+   error=String(err.message||err);
+   success='';
+  }finally{
+   busy=false;
+   render();
+  }
  }
  document.addEventListener('click',e=>{
   const b=e.target.closest('[data-pdf-refresh],[data-pdf-open],[data-pdf-secure]');if(!b||typeof VIEW==='undefined'||VIEW!=='documents')return;
