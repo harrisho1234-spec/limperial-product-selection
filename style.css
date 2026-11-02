@@ -78,3 +78,6 @@
     scrollbar-width: thin;
   }
 }
+
+/* Keep duplicated catalog selections distinct from the standard-size entry. */
+.selection-copy-marker{display:inline-block;margin-top:6px;padding:4px 8px;border-radius:6px;background:#fff3df;color:#825a21;font-weight:700}
