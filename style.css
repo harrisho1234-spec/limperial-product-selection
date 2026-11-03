@@ -121,3 +121,4 @@ body.li-auth-unlocked .li-auth-gate{display:none}
 .li-account-label{font-size:11px;max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#b9c2cd}
 #liGlobalSignout[hidden]{display:none}
 @media(max-width:600px){.li-auth-card{padding:27px 21px}.li-auth-card h1{font-size:26px}.li-account-label{display:none}}
+.li-auth-gate [hidden]{display:none!important}
