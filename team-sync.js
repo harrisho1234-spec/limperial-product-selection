@@ -6,6 +6,7 @@
  const DEFAULT_CONFIG={scriptUrl:'https://script.google.com/macros/s/AKfycbzlXPtmjhHpTot4R0ItabhBOQBrNamB2TUegdq6Lde-uX930U1hIohNqRsvUzMW5LYc1g/exec',clientId:'97172665640-k7lq4tqtl8jl3udei8f4f7tml8agfil4.apps.googleusercontent.com'};let config={...DEFAULT_CONFIG};try{config={...DEFAULT_CONFIG,...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch(_){config={...DEFAULT_CONFIG}}
  let iframe=null,bridgePopup=null,bridgePeer=null,bridgeOrigin='',bridgeNonce='',bridgeMode='iframe',signInStarted=false,ready=false,token='',email='',role='',displayName='';
  let records=[],brands=[],users=[],lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
+ let editingUserEmail='',userManageBusy=false,userManageNotice='',userManageIsError=false;
  const TEAM_BRAND_FILTER_KEY='li-team-brand-filter-v1';
  let teamBrandFilter='all';
  try{teamBrandFilter=localStorage.getItem(TEAM_BRAND_FILTER_KEY)||'all'}catch(_){teamBrandFilter='all'}
@@ -284,7 +285,51 @@ async function onCredential(credential){if(!credential?.credential)return;token=
  }
  async function moderate(id,action){if(!hasRole())return;const r=records.find(x=>x.recordId===id);if(!r)return;const decision=action==='approve'?'Approved':action==='reject'?'Rejected':'Select';const supplierStatus=action==='approve'?'Confirmed':r.supplierStatus;
   try{await call('moderate',{recordId:id,expectedRevision:r.revision,decision,supplierStatus});await refresh();status='connected';lastError='';paint()}catch(err){status='error';lastError=err.message;paint()}}
- async function addUser(form){const data=new FormData(form);try{await call('setUser',{email:String(data.get('email')||''),name:String(data.get('name')||''),role:String(data.get('role')||'Staff'),active:true});await refresh();paint();alert('Staff access updated')}catch(e){status='error';lastError=e.message;paint()}}
+ async function addUser(form){
+  if(role!=='Super Admin'||userManageBusy)return;
+  const data=new FormData(form),address=String(data.get('email')||'').trim().toLowerCase();
+  const name=String(data.get('name')||'').trim(),userRole=String(data.get('role')||'Staff');
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)||!['Staff','Manager','Admin','Super Admin'].includes(userRole))return;
+  if(users.some(u=>String(u.email||'').toLowerCase()===address)){
+    userManageIsError=true;userManageNotice='This email already exists. Use Edit to update its role, name, or access status.';
+    renderTeamManagement();return;
+  }
+  if(userRole==='Super Admin'&&!confirm('Give '+address+' full Super Admin access, including confidential supplier prices and user management?'))return;
+  userManageBusy=true;userManageNotice='Authorizing '+address+'…';userManageIsError=false;renderTeamManagement();
+  try{
+    await call('setUser',{email:address,name,role:userRole,active:true});
+    await refresh();status='connected';userManageNotice='Account authorized: '+address;userManageIsError=false;
+  }catch(e){userManageIsError=true;userManageNotice='Unable to authorize account: '+e.message}
+  finally{userManageBusy=false;renderTeamManagement()}
+ }
+ async function saveEditedUser(form){
+  if(role!=='Super Admin'||userManageBusy)return;
+  const address=String(form.dataset.email||'').trim().toLowerCase();
+  const existing=users.find(u=>String(u.email||'').trim().toLowerCase()===address);
+  if(!existing){userManageIsError=true;userManageNotice='This account is no longer in the directory. Refresh users.';renderTeamManagement();return}
+  const data=new FormData(form);
+  const name=String(data.get('name')||'').trim();
+  const nextRole=String(data.get('role')||existing.role);
+  const active=String(data.get('active')??(existing.active?'true':'false'))==='true';
+  const own=address===email.toLowerCase();
+  if(!['Staff','Manager','Admin','Super Admin'].includes(nextRole)||!name){
+    userManageIsError=true;userManageNotice='Enter a display name and choose a valid role.';renderTeamManagement();return;
+  }
+  if(own&&(!active||nextRole!=='Super Admin')){
+    userManageIsError=true;userManageNotice='You cannot disable or demote your own Super Admin account.';renderTeamManagement();return;
+  }
+  const unchanged=String(existing.name||'')===name&&existing.role===nextRole&&!!existing.active===active;
+  if(unchanged){editingUserEmail='';userManageNotice='No changes needed.';userManageIsError=false;renderTeamManagement();return}
+  if(!active&&existing.active&&!confirm('Deactivate '+address+'? This user will lose Product Selection access after their next authorization check.'))return;
+  if(nextRole==='Super Admin'&&existing.role!=='Super Admin'&&!confirm('Grant '+address+' full Super Admin permissions, including confidential supplier prices?'))return;
+  userManageBusy=true;userManageNotice='Saving '+address+'…';userManageIsError=false;renderTeamManagement();
+  try{
+    await call('setUser',{email:address,name,role:nextRole,active});
+    await refresh();status='connected';editingUserEmail='';
+    userManageNotice='Updated '+address+' successfully.';userManageIsError=false;
+  }catch(e){userManageIsError=true;userManageNotice='Unable to update '+address+': '+e.message}
+  finally{userManageBusy=false;renderTeamManagement()}
+ }
  async function brandCreated(brand){if(!token)return;try{await call('brand',{brand:{id:brand.id,name:brand.name,category:brand.category}});await refresh()}catch(err){status='error';lastError='Brand created only locally: '+err.message;paint()}}
  async function importShared(recordId){
   const record=records.find(r=>r.recordId===recordId);
@@ -452,18 +497,81 @@ async function exportTeamExcel(){
  function rowsHTML(){const map=new Map(brands.map(b=>[b.id,b.name]));const visible=filteredTeamRecords().slice(0,200);
   preloadVisibleTeamPhotos(visible);
   return visible.map(r=>{const image=teamImageForRecord(r);const img=image?.sprite&&typeof photo==='function'?photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(r);return `<article class="candidate-row team-selection-row"><div class="selection-card-head">${img}<div class="selection-card-copy"><div class="tiny">${esc(map.get(r.brandId)||r.brandId)} · ${esc(r.kind)}</div><strong>${esc(r.code||r.itemId)}</strong><div>${esc(r.name||r.item?.name||'Product')}</div><div class="tiny">${esc(r.dimension||'')} · ${esc(r.ownerEmail)}</div><div class="tiny">${esc(r.updatedAt)} · Revision ${r.revision}</div></div></div><div class="team-tags"><span class="pill ${r.decision==='Approved'?'green':'gold'}">${esc(r.decision)}</span><span class="pill">${esc(r.supplierStatus)}</span><span class="tiny">Qty ${esc(r.qty)}</span></div><div class="tiny">${esc(r.notes||'')}</div>${r.brandId===ACTIVE_BRAND_ID?`<div class="row-actions"><button class="btn quiet small" data-sync-action="import" data-record-id="${esc(r.recordId)}">Use in this brand's selections</button></div>`:''}${hasRole()&&r.decision!=='Approved'&&r.decision!=='Rejected'?`<div class="row-actions"><button class="btn small" data-sync-action="approve" data-record-id="${esc(r.recordId)}">Approve & confirm</button><button class="btn danger small" data-sync-action="reject" data-record-id="${esc(r.recordId)}">Reject</button></div>`:''}${canRemoveShared(r)?`<div class="row-actions"><button type="button" class="btn danger small" data-sync-action="removeShared" data-record-id="${esc(r.recordId)}">Remove from Team selections</button></div>`:''}</article>`}).join('')||'<div class="empty"><h3>No shared selections for this brand</h3><p>Choose All brands or another supplier, or share products from My selections.</p></div>'}
+ function roleOptions(current){
+  return ['Staff','Manager','Admin','Super Admin'].map(r=>
+   '<option value="'+esc(r)+'"'+(r===current?' selected':'')+'>'+esc(r)+'</option>').join('');
+ }
+ function renderTeamManagement(){
+  const root=document.getElementById('app');if(!root)return;
+  if(role!=='Super Admin'||!statusView().connected){
+   root.innerHTML='<div class="candidate-row"><h2>Restricted</h2><p>Only Super Admin may manage team accounts.</p></div>';
+   return;
+  }
+  const list=[...users].sort((a,b)=>Number(!!b.active)-Number(!!a.active)||
+    String(a.name||a.email).localeCompare(String(b.name||b.email)));
+  const activeCount=list.filter(u=>u.active).length;
+  const cards=list.map(u=>{
+   const address=String(u.email||'').trim().toLowerCase(),own=address===email.toLowerCase();
+   const isEditing=editingUserEmail===address;
+   const statusLabel=u.active?'Active':'Inactive';
+   const card='<article class="tm-user-card"><div class="tm-user-summary"><div class="tm-user-identity">'+
+    '<strong>'+esc(u.name||address)+'</strong><div class="tiny tm-email">'+esc(address)+'</div></div>'+
+    '<div class="tm-user-controls"><span class="pill">'+esc(u.role)+'</span>'+
+    '<span class="pill '+(u.active?'green':'warn')+'">'+statusLabel+'</span>'+
+    (own?'<span class="tiny">Your account</span>':'')+
+    '<button class="btn secondary small" type="button" data-sync-action="'+(isEditing?'cancelUserEdit':'editUser')+
+    '" data-email="'+esc(address)+'"'+(userManageBusy?' disabled':'')+'>'+(isEditing?'Cancel':'Edit')+'</button></div></div>';
+   if(!isEditing)return card+'</article>';
+   return card+'<form class="tm-edit-form" data-team-edit-form="true" data-email="'+esc(address)+'">'+
+     '<div class="tm-fields"><label class="field"><span>Display name</span><input name="name" value="'+esc(u.name||'')+
+     '" maxlength="100" required></label><label class="field"><span>Role</span><select name="role"'+(own?' disabled':'')+'>'+roleOptions(u.role)+
+     '</select></label><label class="field"><span>Access status</span><select name="active"'+(own?' disabled':'')+'>'+
+     '<option value="true"'+(u.active?' selected':'')+'>Active</option>'+
+     '<option value="false"'+(!u.active?' selected':'')+'>Inactive</option></select></label></div>'+
+     '<p class="tiny">Google email is the account identifier. To change it, authorize the new email and deactivate the old one.</p>'+
+     '<div class="row-actions"><button type="submit" class="btn small"'+(userManageBusy?' disabled':'')+'>Save changes</button>'+
+     '<button type="button" class="btn quiet small" data-sync-action="cancelUserEdit"'+(userManageBusy?' disabled':'')+'>Cancel</button></div></form></article>';
+  }).join('');
+  root.innerHTML='<div class="tm-page"><div class="candidate-row"><div class="variant-top">'+
+   '<div><h2>Manage team access</h2><p class="muted">Manage Google accounts allowed to use Product Selection. Changes are enforced by the private Apps Script authorization service.</p></div>'+
+   '<button class="btn secondary small" type="button" data-sync-action="refreshUsers"'+(userManageBusy?' disabled':'')+'>↻ Refresh accounts</button></div>'+
+   '<div class="tm-stats"><span><b>'+activeCount+'</b> Active</span><span><b>'+(list.length-activeCount)+'</b> Inactive</span>'+
+   '<span><b>'+list.length+'</b> Total accounts</span></div>'+
+   (userManageNotice?'<p role="status" class="'+(userManageIsError?'alert':'tm-success')+'">'+esc(userManageNotice)+'</p>':'')+
+   '<div class="tm-directory">'+(cards||'<p>No authorized users returned. Refresh accounts to try again.</p>')+'</div></div>'+
+   '<div class="candidate-row tm-add-card"><h2>Authorize new team member</h2>'+
+   '<p class="tiny">New users must sign in with the email approved here. Only Super Admin can create, edit, or deactivate accounts.</p>'+
+   '<form id="liTeamAddUser"><div class="tm-fields">'+
+   '<label class="field"><span>Google email</span><input name="email" type="email" autocomplete="off" maxlength="255" placeholder="staff@example.com" required></label>'+
+   '<label class="field"><span>Display name</span><input name="name" maxlength="100" placeholder="Employee name"></label>'+
+   '<label class="field"><span>Assigned role</span><select name="role">'+roleOptions('Staff')+'</select></label></div>'+
+   '<div class="row-actions"><button class="btn" type="submit"'+(userManageBusy?' disabled':'')+'>Authorize user</button></div></form></div></div>';
+ }
  function render(){const root=document.getElementById('app');if(!root)return;
   if(!settingsValid()){root.innerHTML=`<div class="candidate-row" style="max-width:760px"><h2>Secure Google Sheets team synchronization</h2><p>Configure your dedicated Google Apps Script service and Google OAuth Client ID. The Google Sheet is private; users must be authorized before seeing any selection.</p><form id="liSyncConfigForm"><div class="field"><label>Apps Script Web App /exec URL</label><input name="scriptUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" required></div><div class="field" style="margin-top:12px"><label>Google OAuth Web Client ID</label><input name="clientId" placeholder="123...apps.googleusercontent.com" required></div><div class="row-actions"><button type="submit" class="btn">Save connection settings</button></div></form><p class="tiny">An Apps Script deployment is required before real-time sharing can begin. Do not paste a password, service account key, or API secret.</p></div>`;return}
-  root.innerHTML=`<div class="candidate-row"><div class="variant-top"><div><h2>Shared Team Selections</h2><p class="tiny" id="teamSyncNotice">${esc(email&&role?'Signed in as '+email+' · '+role:token?'Verifying Google sign-in and team access…':'Sign in with Google to access team selections')}</p>${lastError?`<p class="alert">${esc(lastError)}</p><div class="row-actions"><button class="btn secondary small" data-sync-action="openBridgePopup">Open secure Google connection window</button><a class="btn quiet small" href="'+esc(config.scriptUrl)+'" target="_blank" rel="noopener">Check deployed Web App URL</a></div>`:''}</div><div class="row-actions">${role==='Super Admin'?'<button class="btn quiet small" data-sync-action="reconfigure">Connection settings</button>':''}${token?'<button class="btn quiet small" data-sync-action="signout">Sign out</button>':''}</div></div>${!token?'<div id="liGoogleSignIn" style="min-height:50px;margin:12px 0"></div><p id="teamSyncConnectError" class="alert" hidden></p><div class="row-actions"><button class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button><button class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button></div>':email&&role?`<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button><button class="btn small" data-sync-action="publish">Share my current ${esc(brandNow().name)} selections</button><span class="tiny">Last refreshed: ${esc(lastFetched||'—')} · ${records.length} records</span></div>`:'<div class="row-actions"><button class="btn secondary small" data-sync-action="retryConnection">Retry team connection</button><span class="tiny">Google account received; checking team authorization</span></div>'}<p class="tiny">Approved staff can browse private supplier catalogs after Google sign-in. New selections and edits sync while signed in; previously saved local drafts are not bulk-published automatically.</p></div>${email&&role?`<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>${teamBrandFilterToolbar()}<div class="row-list">${rowsHTML()}</div>${adminCatalogForm()}${role==='Super Admin'?`<div class="candidate-row"><h3>Manage team access</h3><form id="liTeamAddUser"><div class="variant-fields"><div class="field"><label>Staff email</label><input type="email" name="email" required></div><div class="field"><label>Display name</label><input name="name"></div><div class="field"><label>Role</label><select name="role"><option>Staff</option><option>Manager</option><option>Admin</option><option>Super Admin</option></select></div></div><div class="row-actions"><button class="btn" type="submit">Authorize staff</button></div></form><p class="tiny">Only Super Admin can manage user access. Existing: ${users.length} users.</p></div>`:''}`:''}`;
+  root.innerHTML=`<div class="candidate-row"><div class="variant-top"><div><h2>Shared Team Selections</h2><p class="tiny" id="teamSyncNotice">${esc(email&&role?'Signed in as '+email+' · '+role:token?'Verifying Google sign-in and team access…':'Sign in with Google to access team selections')}</p>${lastError?`<p class="alert">${esc(lastError)}</p><div class="row-actions"><button class="btn secondary small" data-sync-action="openBridgePopup">Open secure Google connection window</button><a class="btn quiet small" href="'+esc(config.scriptUrl)+'" target="_blank" rel="noopener">Check deployed Web App URL</a></div>`:''}</div><div class="row-actions">${role==='Super Admin'?'<button class="btn quiet small" data-sync-action="reconfigure">Connection settings</button>':''}${token?'<button class="btn quiet small" data-sync-action="signout">Sign out</button>':''}</div></div>${!token?'<div id="liGoogleSignIn" style="min-height:50px;margin:12px 0"></div><p id="teamSyncConnectError" class="alert" hidden></p><div class="row-actions"><button class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button><button class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button></div>':email&&role?`<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button><button class="btn small" data-sync-action="publish">Share my current ${esc(brandNow().name)} selections</button><span class="tiny">Last refreshed: ${esc(lastFetched||'—')} · ${records.length} records</span></div>`:'<div class="row-actions"><button class="btn secondary small" data-sync-action="retryConnection">Retry team connection</button><span class="tiny">Google account received; checking team authorization</span></div>'}<p class="tiny">Approved staff can browse private supplier catalogs after Google sign-in. New selections and edits sync while signed in; previously saved local drafts are not bulk-published automatically.</p></div>${email&&role?`<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>${teamBrandFilterToolbar()}<div class="row-list">${rowsHTML()}</div>${adminCatalogForm()}`:''}`;
   if(!token){const slot=document.getElementById('liGoogleSignIn');if(slot)slot.insertAdjacentHTML('afterend',repairClientMarkup());showGoogleButton();if(!signInStarted&&status!=='error'){signInStarted=true;connectButton().catch(e=>{status='error';lastError=e.message;paint()})}}}
- document.addEventListener('submit',e=>{if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target)}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
+ document.addEventListener('submit',e=>{if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target);return}if(e.target.matches('[data-team-edit-form]')){e.preventDefault();saveEditedUser(e.target);return}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
  document.addEventListener('change',e=>{
   if(e.target?.id!=='liTeamBrandFilter')return;
   teamBrandFilter=e.target.value||'all';
   try{localStorage.setItem(TEAM_BRAND_FILTER_KEY,teamBrandFilter)}catch(_){}
   paint();
  });
- document.addEventListener('click',e=>{const b=e.target.closest('[data-sync-action]');if(!b)return;const act=b.dataset.syncAction;if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel();if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
+ document.addEventListener('click',e=>{const b=e.target.closest('[data-sync-action]');if(!b)return;const act=b.dataset.syncAction;
+  if(act==='editUser'&&role==='Super Admin'&&VIEW==='team-management'){
+   editingUserEmail=String(b.dataset.email||'').trim().toLowerCase();userManageNotice='';renderTeamManagement();return;
+  }
+  if(act==='cancelUserEdit'&&role==='Super Admin'&&VIEW==='team-management'){
+   editingUserEmail='';userManageNotice='';renderTeamManagement();return;
+  }
+  if(act==='refreshUsers'&&role==='Super Admin'&&VIEW==='team-management'&&!userManageBusy){
+   userManageBusy=true;userManageNotice='Refreshing authorized accounts…';userManageIsError=false;renderTeamManagement();
+   refresh().then(()=>{status='connected';userManageNotice='Team directory refreshed.';userManageIsError=false})
+    .catch(err=>{userManageIsError=true;userManageNotice='Unable to refresh users: '+err.message})
+    .finally(()=>{userManageBusy=false;renderTeamManagement()});return;
+  }
+  if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel();if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
  async function publishCentralCatalog(form){if(role!=='Super Admin')return;const d=new FormData(form),brandId=String(d.get('brandId')||''),driveFile=String(d.get('driveFile')||'').trim();if(!confirm('Publish this private Drive catalog to authorized staff?'))return;try{const result=await call('publishCatalog',{brandId,driveFile,confirmUntagged:d.has('confirmUntagged')});await refresh();if(result.brandId===ACTIVE_BRAND_ID)window.LICentralCatalog?.ensureBrand(brandId,true).catch(()=>{});alert(result.itemCount+' products published for '+brandId);paint()}catch(err){alert('Catalog publishing failed: '+err.message)}}
  function init(){
@@ -476,5 +584,5 @@ async function exportTeamExcel(){
   loadGsi().then(()=>{initializeGoogleIdentity();showGoogleButton();if(!token)offerReturningGoogleSignIn()})
    .catch(err=>{console.warn('Google auto sign-in unavailable',err);lastError=err.message;syncAccessGate()});
 }
- window.LITeamSync={init,render,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),refresh,disconnect,request:call};
+ window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),refresh,disconnect,request:call};
 })();
