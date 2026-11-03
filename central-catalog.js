@@ -5,6 +5,8 @@
 'use strict';
 (function(){
  const entries=new Map(),loading=new Map(),errors=new Map(),progress=new Map();
+ const teamPhotoPacks=new Map(),teamPhotoLoading=new Map(),teamPhotoErrors=new Map();
+ let teamPhotoGeneration=0;
  let lastRole='',lastEmail='';
  function signedIn(){return !!window.LITeamSync?.status()?.connected}
  function known(id){return entries.get(id)||null}
@@ -100,6 +102,132 @@
    if(!isCentralPack(ACTIVE_PACK))return false;
    return ACTIVE_PACK.metadata?.centralVersion!==current.version;
  }
+ // Team selections can be filtered by another supplier while the active workspace
+ // (PACK/SPRITES) still belongs to Asfour. Keep those approved images isolated.
+ function clearTeamPhotos(){
+   teamPhotoGeneration++;
+   for(const lib of teamPhotoPacks.values())
+     for(const url of Object.values(lib.urls||{}))
+       if(typeof url==='string'&&url.startsWith('blob:'))URL.revokeObjectURL(url);
+   teamPhotoPacks.clear();teamPhotoLoading.clear();teamPhotoErrors.clear();
+ }
+ function findTeamPhotoItem(items,record){
+   if(!Array.isArray(items)||!record)return null;
+   const withPhoto=x=>!!(x?.sprite&&(x.sprite.atlas||x.sprite.data));
+   const ids=[record.itemId,record.item?.sourceItemId,record.entry?.sourceItemId].filter(Boolean).map(String);
+   for(const id of ids){
+     const match=items.find(x=>String(x.id)===id&&withPhoto(x));
+     if(match)return match;
+   }
+   const code=String(record.code||record.item?.code||'').trim().toLowerCase();
+   if(code){
+     const same=items.filter(x=>withPhoto(x)&&String(x.code||'').trim().toLowerCase()===code);
+     if(same.length===1)return same[0];
+   }
+   const ref=String(record.photoRef||record.item?.photoRef||'');
+   if(ref){
+     const same=items.filter(x=>x.sprite?.atlas&&ref===x.sprite.atlas+'#'+x.sprite.index);
+     if(same.length===1)return same[0];
+   }
+   const name=String(record.name||record.item?.name||'').trim().toLowerCase();
+   if(name){
+     const same=items.filter(x=>withPhoto(x)&&String(x.name||'').trim().toLowerCase()===name);
+     if(same.length===1)return same[0];
+   }
+   return null;
+ }
+ function teamPhotoFor(record){
+   if(!signedIn()||!record||record.brandId===ACTIVE_BRAND_ID)return null;
+   const lib=teamPhotoPacks.get(String(record.brandId));
+   if(!lib||lib.version!==known(record.brandId)?.version)return null;
+   const item=findTeamPhotoItem(lib.items,record),sprite=item?.sprite;
+   if(!sprite)return null;
+   if(sprite.data){
+     if(/^data:image\/(webp|png|jpeg);base64,/.test(sprite.data))
+       return {sprite,urls:lib.urls};
+     return null;
+   }
+   return sprite.atlas&&lib.urls[sprite.atlas]?{sprite,urls:lib.urls}:null;
+ }
+ function teamPhotoStatus(brandId){
+   if(brandId===ACTIVE_BRAND_ID)return PACK?'ready':'loading';
+   if(teamPhotoLoading.has(brandId))return 'loading';
+   if(teamPhotoErrors.has(brandId))return 'error';
+   if(!known(brandId))return 'unpublished';
+   return teamPhotoPacks.has(brandId)?'ready':'pending';
+ }
+ function ensureTeamPhotos(brandId,records,force=false){
+   brandId=String(brandId||'');
+   const meta=known(brandId),role=window.LITeamSync?.getRoles()?.role;
+   if(!signedIn()||brandId===ACTIVE_BRAND_ID||!meta)return Promise.resolve(null);
+   if(role!=='Super Admin'&&!String(meta.version).endsWith('-price-safe-v1'))
+     return Promise.resolve(null);
+   if(force)teamPhotoErrors.delete(brandId);
+   if(teamPhotoErrors.has(brandId))return Promise.resolve(null);
+   if(teamPhotoLoading.has(brandId))return teamPhotoLoading.get(brandId);
+   const selected=(Array.isArray(records)?records:[]).filter(r=>r?.brandId===brandId&&!r.deleted).slice(0,200);
+   if(!selected.length)return Promise.resolve(null);
+   const existing=teamPhotoPacks.get(brandId);
+   if(existing?.version===meta.version){
+     const needed=selected.map(r=>findTeamPhotoItem(existing.items,r)?.sprite?.atlas).filter(Boolean)
+       .filter(k=>existing.keys.has(k));
+     if(needed.every(key=>existing.urls[key]))return Promise.resolve(existing);
+   }
+   const generation=teamPhotoGeneration;
+   const valid=()=>signedIn()&&generation===teamPhotoGeneration&&known(brandId)?.version===meta.version;
+   const run=(async()=>{
+     let lib=teamPhotoPacks.get(brandId);
+     if(!lib||lib.version!==meta.version){
+       const manifest=await window.LITeamSync.request('catalogManifest',{brandId});
+       if(!valid())return null;
+       if(manifest.brandId!==brandId||manifest.version!==meta.version||
+          !Array.isArray(manifest.catalog?.items)||!Array.isArray(manifest.spriteKeys)||
+          manifest.catalog.items.length>6000||manifest.spriteKeys.length>500)
+         throw Error('Invalid authorized catalog response');
+       // Retain only photo lookup fields, not supplier price or cost data.
+       const items=manifest.catalog.items.map(i=>({
+         id:i.id,code:i.code,name:i.name,page:i.page,
+         sprite:i.sprite
+       }));
+       lib={version:meta.version,items,keys:new Set(manifest.spriteKeys),urls:Object.create(null)};
+       const prior=teamPhotoPacks.get(brandId);
+       if(prior)for(const url of Object.values(prior.urls))
+         if(url.startsWith('blob:'))URL.revokeObjectURL(url);
+       teamPhotoPacks.set(brandId,lib);
+     }
+     const wanted=[...new Set(selected.map(r=>findTeamPhotoItem(lib.items,r)?.sprite?.atlas)
+       .filter(k=>k&&lib.keys.has(k)&&!lib.urls[k]))];
+     const batches=[];
+     for(let i=0;i<wanted.length;i+=4)batches.push(wanted.slice(i,i+4));
+     // Fetch only photo sheets referenced by the filtered team selections.
+     for(const batch of batches){
+       if(!valid())return null;
+       const response=await window.LITeamSync.request('catalogSprites',{brandId,version:meta.version,keys:batch});
+       if(!valid())return null;
+       if(response.brandId!==brandId||response.version!==meta.version)throw Error('Catalog changed while loading photos');
+       for(const key of batch){
+         const data=response.sprites?.[key];
+         if(typeof data!=='string'||!/^data:image\/webp;base64,[A-Za-z0-9+/=]+$/.test(data))
+           throw Error('Authorized product photo is unavailable');
+         const raw=atob(data.slice(data.indexOf(',')+1)),bytes=new Uint8Array(raw.length);
+         for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);
+         lib.urls[key]=URL.createObjectURL(new Blob([bytes],{type:'image/webp'}));
+       }
+     }
+     return lib;
+   })();
+   teamPhotoLoading.set(brandId,run);
+   run.then(()=>{if(teamPhotoLoading.get(brandId)===run)teamPhotoLoading.delete(brandId);
+     if(valid()&&VIEW==='team')window.LITeamSync?.render?.();
+   }).catch(err=>{
+     if(teamPhotoLoading.get(brandId)===run)teamPhotoLoading.delete(brandId);
+     if(valid()){
+       teamPhotoErrors.set(brandId,String(err?.message||err));
+       if(VIEW==='team')window.LITeamSync?.render?.();
+     }
+   });
+   return run;
+ }
  function onConnected(){
    // Team records can arrive before authentication status switches to "connected".
    // Fetch catalog/photos only once the verified session is fully established.
@@ -119,16 +247,16 @@
      entries.set(row.brandId,row);
    }
    // Never reuse a more-privileged catalog or photo cache after account/role changes.
-   if(identityChanged)clearActivePack();
+   if(identityChanged){clearActivePack();clearTeamPhotos();}
    // refresh() may run before status becomes connected; authenticateCurrentToken
    // calls onConnected() after verification succeeds.
    onConnected();
  }
  function onSignedOut(){
    entries.clear();errors.clear();progress.clear();lastRole='';lastEmail='';
-   clearActivePack();
+   clearActivePack();clearTeamPhotos();
    if(VIEW!=='team'&&typeof render==='function')render();
  }
  function isLocked(pack){return isCentralPack(pack)&&!signedIn()}
- window.LICentralCatalog={ensureBrand,onSignedIn,onSignedOut,onConnected,readyPack,banner,isLocked,known,errors};
+ window.LICentralCatalog={ensureBrand,onSignedIn,onSignedOut,onConnected,readyPack,banner,isLocked,known,errors,ensureTeamPhotos,teamPhotoFor,teamPhotoStatus};
 })();
