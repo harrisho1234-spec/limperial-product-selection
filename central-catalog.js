@@ -5,6 +5,7 @@
 'use strict';
 (function(){
  const entries=new Map(),loading=new Map(),errors=new Map(),progress=new Map();
+ let lastRole='',lastEmail='';
  function signedIn(){return !!window.LITeamSync?.status()?.connected}
  function known(id){return entries.get(id)||null}
  function isCentralPack(pack){return !!(pack&&pack.metadata?.centralManaged===true)}
@@ -86,27 +87,48 @@
    }).finally(()=>{loading.delete(brandId);progress.delete(brandId)});
    loading.set(brandId,run);run.finally(()=>{if(ACTIVE_BRAND_ID===brandId&&VIEW!=='team'&&typeof render==='function')render()}).catch(()=>{});return run;
  }
+ function clearActivePack(){
+   PACK=null;ACTIVE_PACK=null;
+   Object.values(SPRITES).forEach(url=>{if(typeof url==='string'&&url.startsWith('blob:'))URL.revokeObjectURL(url)});
+   SPRITES={};
+ }
+ function activeCatalogOutdated(){
+   const current=known(ACTIVE_BRAND_ID);
+   if(!current)return false;
+   if(!PACK)return true;
+   // Local Super Admin imports remain usable until an explicit catalog refresh.
+   if(!isCentralPack(ACTIVE_PACK))return false;
+   return ACTIVE_PACK.metadata?.centralVersion!==current.version;
+ }
+ function onConnected(){
+   // Team records can arrive before authentication status switches to "connected".
+   // Fetch catalog/photos only once the verified session is fully established.
+   if(signedIn()&&activeCatalogOutdated())ensureBrand(ACTIVE_BRAND_ID).catch(()=>{});
+ }
  function onSignedIn(data){
-   entries.clear();const role=data?.user?.role;
+   const nextRole=String(data?.user?.role||''),nextEmail=String(data?.user?.email||'').toLowerCase();
+   const identityChanged=!!lastRole&&(lastRole!==nextRole||lastEmail!==nextEmail);
+   lastRole=nextRole;lastEmail=nextEmail;
+   entries.clear();
    for(const row of data.catalogs||[]){
      if(!row?.brandId||!row.version)continue;
-     if(role!=='Super Admin'&&!String(row.version).endsWith('-price-safe-v1')){
+     if(nextRole!=='Super Admin'&&!String(row.version).endsWith('-price-safe-v1')){
        errors.set(row.brandId,'Price-free catalog controls are not active on the deployed Apps Script. This role cannot download the original price-list images.');
        continue;
      }
      entries.set(row.brandId,row);
    }
-   // Never retain a previous Super Admin's visual pack in a Manager session.
-   if(role!=='Super Admin'){
-     PACK=null;ACTIVE_PACK=null;
-     Object.values(SPRITES).forEach(url=>{if(typeof url==='string'&&url.startsWith('blob:'))URL.revokeObjectURL(url)});
-     SPRITES={};
-   }
-   if(known(ACTIVE_BRAND_ID))ensureBrand(ACTIVE_BRAND_ID).catch(()=>{});
+   // Never reuse a more-privileged catalog or photo cache after account/role changes.
+   if(identityChanged)clearActivePack();
+   // refresh() may run before status becomes connected; authenticateCurrentToken
+   // calls onConnected() after verification succeeds.
+   onConnected();
  }
- function onSignedOut(){entries.clear();errors.clear();progress.clear();
-   if(isCentralPack(ACTIVE_PACK)){PACK=null;ACTIVE_PACK=null;Object.values(SPRITES).forEach(url=>{if(url.startsWith('blob:'))URL.revokeObjectURL(url)});SPRITES={};if(VIEW!=='team')render()}
+ function onSignedOut(){
+   entries.clear();errors.clear();progress.clear();lastRole='';lastEmail='';
+   clearActivePack();
+   if(VIEW!=='team'&&typeof render==='function')render();
  }
  function isLocked(pack){return isCentralPack(pack)&&!signedIn()}
- window.LICentralCatalog={ensureBrand,onSignedIn,onSignedOut,readyPack,banner,isLocked,known,errors};
+ window.LICentralCatalog={ensureBrand,onSignedIn,onSignedOut,onConnected,readyPack,banner,isLocked,known,errors};
 })();
