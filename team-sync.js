@@ -5,7 +5,7 @@
  const KEY='li-team-sync-client-config-v1';const SESSION_KEY='li-team-browser-session-v1';const APP_ORIGIN=location.origin;
  const DEFAULT_CONFIG={scriptUrl:'https://script.google.com/macros/s/AKfycbzlXPtmjhHpTot4R0ItabhBOQBrNamB2TUegdq6Lde-uX930U1hIohNqRsvUzMW5LYc1g/exec',clientId:'97172665640-k7lq4tqtl8jl3udei8f4f7tml8agfil4.apps.googleusercontent.com'};let config={...DEFAULT_CONFIG};try{config={...DEFAULT_CONFIG,...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch(_){config={...DEFAULT_CONFIG}}
  let iframe=null,bridgePopup=null,bridgePeer=null,bridgeOrigin='',bridgeNonce='',bridgeMode='iframe',signInStarted=false,ready=false,token='',email='',role='',displayName='';
- let records=[],brands=[],users=[],lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false;
+ let records=[],brands=[],users=[],lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
  const TEAM_BRAND_FILTER_KEY='li-team-brand-filter-v1';
  let teamBrandFilter='all';
  try{teamBrandFilter=localStorage.getItem(TEAM_BRAND_FILTER_KEY)||'all'}catch(_){teamBrandFilter='all'}
@@ -34,6 +34,7 @@
    },90000);
   }catch(err){
    if(invalidIdentity(err)){
+    window.LICentralCatalog?.onSignedOut();
     clearRememberedSession();token='';email='';role='';displayName='';
     status='auth-required';lastError='Google sign-in needs renewal or this account is not authorized: '+err.message;
    }else{
@@ -43,9 +44,67 @@
    paint();
   }finally{credentialInFlight=false}
  }
- function statusView(){return {status,email,role,lastError,ready,lastFetched,connected:status==='connected'&&!!token&&!!email&&!!role&&ready}}
+ function statusView(){
+  const connected=status==='connected'&&!!token&&!!email&&LI_ROLES_UI.includes(role)&&ready&&tokenExpiresAt(token)>Date.now();
+  return {status,email,role,lastError,ready,lastFetched,connected};
+ }
+ const LI_ROLES_UI=['Super Admin','Admin','Manager','Staff'];
+ function syncAccessGate(){
+  const gate=document.getElementById('liAuthGate'),content=document.getElementById('liAuthGateContent');
+  if(!gate||!content)return;
+  const allowed=statusView().connected,layout=document.querySelector('.layout');
+  document.body.classList.toggle('li-auth-unlocked',allowed);
+  if(layout)layout.inert=!allowed;
+  const backup=document.getElementById('backupTop');if(backup)backup.disabled=!allowed;
+  const signout=document.getElementById('liGlobalSignout');if(signout)signout.hidden=!allowed;
+  const account=document.getElementById('liAccountLabel');if(account)account.textContent=allowed?email+' · '+role:'';
+  gate.setAttribute('aria-hidden',allowed?'true':'false');
+  if(allowed){
+   if(!hasUnlockedOnce){
+    hasUnlockedOnce=true;
+    if(typeof VIEW!=='undefined'&&VIEW==='team')VIEW='brands';
+    if(typeof render==='function')render();
+   }
+   return;
+  }
+  // Never expose navigation, downloads, or cached catalogs without a freshly
+  // server-authorized email and role. A restored token is verified first.
+  const mode=!settingsValid()?'config':token?'verifying':'signin';
+  if(content.dataset.liGateMode!==mode){
+   content.dataset.liGateMode=mode;
+   if(mode==='config'){
+    content.innerHTML='<p class="li-auth-error">This device needs the approved Product Selection connection settings.</p>'+
+      '<form id="liSyncConfigForm"><div class="field"><label>Apps Script Web App /exec URL</label><input type="url" name="scriptUrl" required placeholder="https://script.google.com/macros/s/…/exec"></div>'+
+      '<div class="field" style="margin-top:12px"><label>Google Web OAuth Client ID</label><input name="clientId" required placeholder="…apps.googleusercontent.com"></div>'+
+      '<div class="li-auth-actions"><button type="submit" class="btn">Save connection settings</button></div></form>';
+   }else{
+    content.innerHTML='<p id="liGateAuthStatus" class="li-auth-status" role="status"></p>'+
+      '<div id="liGateError" class="li-auth-error" role="alert" hidden></div>'+
+      '<div id="liGateGoogleSignIn"></div>'+
+      '<div class="li-auth-actions"><button type="button" class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button>'+
+      '<button type="button" class="btn secondary small" data-sync-action="retryConnection">Retry connection</button>'+
+      '<button type="button" class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button>'+
+      '<button type="button" class="btn quiet small" data-sync-action="signout">Change Google account</button></div>';
+   }
+  }
+  const stat=document.getElementById('liGateAuthStatus');
+  if(stat)stat.textContent=token?
+   'Google account received. Verifying email and assigned role with L\'Imperial Team Sync…':
+   'Use the Google account approved by your Super Admin.';
+  const error=document.getElementById('liGateError');
+  if(error){error.textContent=lastError||'';error.hidden=!lastError;}
+  const retry=document.querySelector('#liAuthGate [data-sync-action="retryConnection"]');
+  if(retry)retry.hidden=!token;
+  const change=document.querySelector('#liAuthGate [data-sync-action="signout"]');
+  if(change)change.hidden=!token;
+  const signin=document.querySelector('#liAuthGate [data-sync-action="retrySignIn"]');
+  if(signin)signin.hidden=!!token;
+  const slot=document.getElementById('liGateGoogleSignIn');
+  if(slot)slot.hidden=!!token;
+  if(!token)showGoogleButton();
+ }
  function info(text){const n=document.getElementById('teamSyncNotice');if(n)n.textContent=text}
- function paint(){if(typeof VIEW!=='undefined'&&VIEW==='team')render()}
+ function paint(){syncAccessGate();if(typeof VIEW!=='undefined'&&VIEW==='team'&&statusView().connected)render()}
  function saveConfig(next){const clientId=normalizeConfigValue(next.clientId),scriptUrl=normalizeConfigValue(next.scriptUrl);if(!/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(clientId))throw Error('Enter the Web OAuth Client ID from Google Cloud');if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(scriptUrl))throw Error('Enter the deployed Apps Script Web App /exec URL');config={clientId,scriptUrl};localStorage.setItem(KEY,JSON.stringify(config));status='configured';lastError='';disconnect(false);paint();return true}
  function repairClientMarkup(){
   const projectUrl='https://console.cloud.google.com/auth/clients?project=limperialproductselection-sync';
@@ -95,14 +154,20 @@ function offerReturningGoogleSignIn(){
   }
 }
 function showGoogleButton(force=false){
-  const slot=document.getElementById('liGoogleSignIn');
-  if(!slot||!window.google?.accounts?.id||!settingsValid())return false;
+  if(!window.google?.accounts?.id||!settingsValid())return false;
   initializeGoogleIdentity();
-  if(force||slot.dataset.liClientId!==config.clientId||!slot.querySelector('iframe')){
-    slot.innerHTML='';google.accounts.id.renderButton(slot,{type:'standard',shape:'pill',theme:'outline',text:'signin_with',size:'large',width:260});
+  let rendered=false;
+  for(const id of ['liGateGoogleSignIn','liGoogleSignIn']){
+   const slot=document.getElementById(id);
+   if(!slot||slot.hidden)continue;
+   if(force||slot.dataset.liClientId!==config.clientId||!slot.querySelector('iframe')){
+    slot.innerHTML='';
+    google.accounts.id.renderButton(slot,{type:'standard',shape:'pill',theme:'outline',text:'signin_with',size:'large',width:260});
     slot.dataset.liClientId=config.clientId;
+   }
+   rendered=true;
   }
-  return true;
+  return rendered;
 }
 function paintConnectionError(message){
   const n=document.getElementById('teamSyncConnectError');
@@ -127,13 +192,13 @@ async function connectButton(force=false){
     paint();
   }
 }
-function paintStatusOnly(){const t=document.getElementById('teamSyncNotice');if(t)t.textContent=token?(email&&role?'Signed in as '+email+' · '+role:'Verifying Google sign-in and team access…'):ready?'Google connection ready. Sign in to share selections.':'Sign in with Google to access team selections'}
+function paintStatusOnly(){const t=document.getElementById('teamSyncNotice');if(t)t.textContent=token?(email&&role?'Signed in as '+email+' · '+role:'Verifying Google sign-in and team access…'):ready?'Google connection ready. Sign in to share selections.':'Sign in with Google to access team selections';syncAccessGate()}
 async function onCredential(credential){if(!credential?.credential)return;token=credential.credential;clearRememberedSession();await authenticateCurrentToken()}
  function disconnect(keepConfig=true,explicitSignOut=false){
   if(explicitSignOut&&window.google?.accounts?.id){
     try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
   }
-  window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';paint()}
+  window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';hasUnlockedOnce=false;paint()}
  async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=data.selections||[];brands=data.brands||[];users=data.users||[];window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
   // Create lightweight brand records for shared suppliers without overwriting local private catalogs.
   const existing=new Set(BRANDS.map(x=>x.id));let changed=false;for(const b of brands){if(!existing.has(b.id)){BRANDS.push({id:b.id,name:b.name,category:b.category||'Other',shared:true});changed=true}}if(changed)persistBrandDirectory();
@@ -401,13 +466,14 @@ async function exportTeamExcel(){
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
  async function publishCentralCatalog(form){if(role!=='Super Admin')return;const d=new FormData(form),brandId=String(d.get('brandId')||''),driveFile=String(d.get('driveFile')||'').trim();if(!confirm('Publish this private Drive catalog to authorized staff?'))return;try{const result=await call('publishCatalog',{brandId,driveFile,confirmUntagged:d.has('confirmUntagged')});await refresh();if(result.brandId===ACTIVE_BRAND_ID)window.LICentralCatalog?.ensureBrand(brandId,true).catch(()=>{});alert(result.itemCount+' products published for '+brandId);paint()}catch(err){alert('Catalog publishing failed: '+err.message)}}
  function init(){
+  syncAccessGate();
   if(!settingsValid())return;
   // Only the current browser session remembers the short-lived ID credential.
   // Apps Script verifies it again before returning any private data.
   const restored=restoreRememberedSession();
   if(restored)authenticateCurrentToken();
-  loadGsi().then(()=>{initializeGoogleIdentity();if(!token)offerReturningGoogleSignIn()})
-   .catch(err=>console.warn('Google auto sign-in unavailable',err));
+  loadGsi().then(()=>{initializeGoogleIdentity();showGoogleButton();if(!token)offerReturningGoogleSignIn()})
+   .catch(err=>{console.warn('Google auto sign-in unavailable',err);lastError=err.message;syncAccessGate()});
 }
  window.LITeamSync={init,render,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),refresh,disconnect,request:call};
 })();
