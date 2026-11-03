@@ -62,8 +62,9 @@
   if(allowed){
    if(!hasUnlockedOnce){
     hasUnlockedOnce=true;
-    if(typeof VIEW!=='undefined'&&VIEW==='team')VIEW='brands';
-    if(typeof render==='function')render();
+    // The full application renders its own landing screen after authorization.
+    // Do not call the Team selections renderer here.
+    window.LIAppAuthorized?.({email,role});
    }
    return;
   }
