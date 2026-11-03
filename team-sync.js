@@ -165,6 +165,27 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   }
   return own||null;
  }
+ function teamImageForRecord(record){
+   const item=productFromLocal(record);
+   if(item?.sprite&&(item.sprite.data||(item.sprite.atlas&&SPRITES[item.sprite.atlas])))
+     return {sprite:item.sprite,urls:SPRITES};
+   return window.LICentralCatalog?.teamPhotoFor?.(record)||null;
+ }
+ function preloadVisibleTeamPhotos(visible){
+   if(!window.LITeamSync?.status()?.connected)return;
+   for(const brandId of new Set(visible.map(r=>String(r.brandId||'')).filter(Boolean))){
+     if(brandId!==ACTIVE_BRAND_ID)
+       window.LICentralCatalog?.ensureTeamPhotos?.(brandId,visible)?.catch(()=>{});
+   }
+ }
+ function photoPlaceholder(record){
+   const state=window.LICentralCatalog?.teamPhotoStatus?.(record.brandId);
+   const caption=state==='loading'||state==='pending'?'Loading supplier photos…':
+     state==='unpublished'?'Supplier catalog not published':
+     state==='error'?'Unable to load approved photos':
+     'Photo unavailable in approved catalog';
+   return '<div class="team-photo-placeholder">📦<small>'+esc(caption)+'</small></div>';
+ }
  function recordId(kind,id){return email+'|'+ACTIVE_BRAND_ID+'|'+kind+'|'+id}
  function snapshot(kind,id){if(!PACK)return null;const item=kind==='catalog'?catalogItemForSelection(id):allVariants().find(x=>x.id===id);if(!item)return null;const entry=kind==='catalog'?candidateEntry(item):variantEntry(item);
   return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,code:item.code||'',name:item.name||item.type||'',type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:item.sprite?.atlas?item.sprite.atlas+'#'+item.sprite.index:(item.sourceRef||'')},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
@@ -293,6 +314,14 @@ async function exportTeamExcel(){
   if(button){button.disabled=true;button.textContent='Preparing Excel…'}
   try{
     if(!window.ExcelJS){exportTeamCsv(items);alert('The Excel library did not load. A CSV without photos has been downloaded instead.');return}
+    // Make a best effort to load each filtered brand's approved photos before export.
+    if(button)button.textContent='Loading approved photos…';
+    const recordList=items.map(x=>x.record);
+    const otherBrands=[...new Set(recordList.map(r=>r.brandId))].filter(id=>id!==ACTIVE_BRAND_ID);
+    await Promise.allSettled(otherBrands.map(id=>window.LICentralCatalog?.ensureTeamPhotos?.(id,recordList)));
+    if(items.some(x=>x.record.brandId===ACTIVE_BRAND_ID))
+      await window.LICentralCatalog?.ensureBrand?.(ACTIVE_BRAND_ID).catch(()=>{});
+    if(button)button.textContent='Preparing Excel…';
     const book=new window.ExcelJS.Workbook();
     book.creator="L'Imperial Product Selection Studio";
     const sheet=book.addWorksheet('Team Selections',{views:[{state:'frozen',ySplit:3}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}});
@@ -316,12 +345,12 @@ async function exportTeamExcel(){
       row.height=83;
       row.alignment={vertical:'middle',wrapText:true};
       for(let col=1;col<=14;col++)sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
-      // Only a picture already available in this authorized device/brand can be embedded.
-      // Never load an original price-list PDF page or a guessed remote image.
-      const item=productFromLocal(info.record);
-      if(item?.sprite&&typeof imageFromSprite==='function'){
+      // Only a photo delivered by the authenticated catalog service can be embedded.
+      // Never retrieve a supplier PDF or guess a public image URL.
+      const image=teamImageForRecord(info.record);
+      if(image?.sprite&&typeof imageFromSprite==='function'){
         try{
-          const data=await imageFromSprite(item.sprite);
+          const data=await imageFromSprite(image.sprite,image.urls);
           if(data){
             const imageId=book.addImage({base64:data,extension:'png'});
             sheet.addImage(imageId,{tl:{col:1.16,row:i-1+0.06},ext:{width:92,height:92},editAs:'oneCell'});
@@ -355,7 +384,8 @@ async function exportTeamExcel(){
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
  function rowsHTML(){const map=new Map(brands.map(b=>[b.id,b.name]));const visible=filteredTeamRecords().slice(0,200);
-  return visible.map(r=>{const item=productFromLocal(r);const hasPhoto=!!(item?.sprite&&(item.sprite.data||(item.sprite.atlas&&SPRITES[item.sprite.atlas])));const img=hasPhoto&&typeof photo==='function'?photo(item.sprite,'selection-thumb'):'<div class="team-photo-placeholder">📦<small>'+(r.brandId===ACTIVE_BRAND_ID&&!PACK?'Loading supplier catalog':'Photo unavailable in approved catalog')+'</small></div>';return `<article class="candidate-row team-selection-row"><div class="selection-card-head">${img}<div class="selection-card-copy"><div class="tiny">${esc(map.get(r.brandId)||r.brandId)} · ${esc(r.kind)}</div><strong>${esc(r.code||r.itemId)}</strong><div>${esc(r.name||r.item?.name||'Product')}</div><div class="tiny">${esc(r.dimension||'')} · ${esc(r.ownerEmail)}</div><div class="tiny">${esc(r.updatedAt)} · Revision ${r.revision}</div></div></div><div class="team-tags"><span class="pill ${r.decision==='Approved'?'green':'gold'}">${esc(r.decision)}</span><span class="pill">${esc(r.supplierStatus)}</span><span class="tiny">Qty ${esc(r.qty)}</span></div><div class="tiny">${esc(r.notes||'')}</div>${r.brandId===ACTIVE_BRAND_ID?`<div class="row-actions"><button class="btn quiet small" data-sync-action="import" data-record-id="${esc(r.recordId)}">Use in this brand's selections</button></div>`:''}${hasRole()&&r.decision!=='Approved'&&r.decision!=='Rejected'?`<div class="row-actions"><button class="btn small" data-sync-action="approve" data-record-id="${esc(r.recordId)}">Approve & confirm</button><button class="btn danger small" data-sync-action="reject" data-record-id="${esc(r.recordId)}">Reject</button></div>`:''}${canRemoveShared(r)?`<div class="row-actions"><button type="button" class="btn danger small" data-sync-action="removeShared" data-record-id="${esc(r.recordId)}">Remove from Team selections</button></div>`:''}</article>`}).join('')||'<div class="empty"><h3>No shared selections for this brand</h3><p>Choose All brands or another supplier, or share products from My selections.</p></div>'}
+  preloadVisibleTeamPhotos(visible);
+  return visible.map(r=>{const image=teamImageForRecord(r);const img=image?.sprite&&typeof photo==='function'?photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(r);return `<article class="candidate-row team-selection-row"><div class="selection-card-head">${img}<div class="selection-card-copy"><div class="tiny">${esc(map.get(r.brandId)||r.brandId)} · ${esc(r.kind)}</div><strong>${esc(r.code||r.itemId)}</strong><div>${esc(r.name||r.item?.name||'Product')}</div><div class="tiny">${esc(r.dimension||'')} · ${esc(r.ownerEmail)}</div><div class="tiny">${esc(r.updatedAt)} · Revision ${r.revision}</div></div></div><div class="team-tags"><span class="pill ${r.decision==='Approved'?'green':'gold'}">${esc(r.decision)}</span><span class="pill">${esc(r.supplierStatus)}</span><span class="tiny">Qty ${esc(r.qty)}</span></div><div class="tiny">${esc(r.notes||'')}</div>${r.brandId===ACTIVE_BRAND_ID?`<div class="row-actions"><button class="btn quiet small" data-sync-action="import" data-record-id="${esc(r.recordId)}">Use in this brand's selections</button></div>`:''}${hasRole()&&r.decision!=='Approved'&&r.decision!=='Rejected'?`<div class="row-actions"><button class="btn small" data-sync-action="approve" data-record-id="${esc(r.recordId)}">Approve & confirm</button><button class="btn danger small" data-sync-action="reject" data-record-id="${esc(r.recordId)}">Reject</button></div>`:''}${canRemoveShared(r)?`<div class="row-actions"><button type="button" class="btn danger small" data-sync-action="removeShared" data-record-id="${esc(r.recordId)}">Remove from Team selections</button></div>`:''}</article>`}).join('')||'<div class="empty"><h3>No shared selections for this brand</h3><p>Choose All brands or another supplier, or share products from My selections.</p></div>'}
  function render(){const root=document.getElementById('app');if(!root)return;
   if(!settingsValid()){root.innerHTML=`<div class="candidate-row" style="max-width:760px"><h2>Secure Google Sheets team synchronization</h2><p>Configure your dedicated Google Apps Script service and Google OAuth Client ID. The Google Sheet is private; users must be authorized before seeing any selection.</p><form id="liSyncConfigForm"><div class="field"><label>Apps Script Web App /exec URL</label><input name="scriptUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" required></div><div class="field" style="margin-top:12px"><label>Google OAuth Web Client ID</label><input name="clientId" placeholder="123...apps.googleusercontent.com" required></div><div class="row-actions"><button type="submit" class="btn">Save connection settings</button></div></form><p class="tiny">An Apps Script deployment is required before real-time sharing can begin. Do not paste a password, service account key, or API secret.</p></div>`;return}
   root.innerHTML=`<div class="candidate-row"><div class="variant-top"><div><h2>Shared Team Selections</h2><p class="tiny" id="teamSyncNotice">${esc(email&&role?'Signed in as '+email+' · '+role:token?'Verifying Google sign-in and team access…':'Sign in with Google to access team selections')}</p>${lastError?`<p class="alert">${esc(lastError)}</p><div class="row-actions"><button class="btn secondary small" data-sync-action="openBridgePopup">Open secure Google connection window</button><a class="btn quiet small" href="'+esc(config.scriptUrl)+'" target="_blank" rel="noopener">Check deployed Web App URL</a></div>`:''}</div><div class="row-actions">${role==='Super Admin'?'<button class="btn quiet small" data-sync-action="reconfigure">Connection settings</button>':''}${token?'<button class="btn quiet small" data-sync-action="signout">Sign out</button>':''}</div></div>${!token?'<div id="liGoogleSignIn" style="min-height:50px;margin:12px 0"></div><p id="teamSyncConnectError" class="alert" hidden></p><div class="row-actions"><button class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button><button class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button></div>':email&&role?`<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button><button class="btn small" data-sync-action="publish">Share my current ${esc(brandNow().name)} selections</button><span class="tiny">Last refreshed: ${esc(lastFetched||'—')} · ${records.length} records</span></div>`:'<div class="row-actions"><button class="btn secondary small" data-sync-action="retryConnection">Retry team connection</button><span class="tiny">Google account received; checking team authorization</span></div>'}<p class="tiny">Approved staff can browse private supplier catalogs after Google sign-in. New selections and edits sync while signed in; previously saved local drafts are not bulk-published automatically.</p></div>${email&&role?`<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>${teamBrandFilterToolbar()}<div class="row-list">${rowsHTML()}</div>${adminCatalogForm()}${role==='Super Admin'?`<div class="candidate-row"><h3>Manage team access</h3><form id="liTeamAddUser"><div class="variant-fields"><div class="field"><label>Staff email</label><input type="email" name="email" required></div><div class="field"><label>Display name</label><input name="name"></div><div class="field"><label>Role</label><select name="role"><option>Staff</option><option>Manager</option><option>Admin</option><option>Super Admin</option></select></div></div><div class="row-actions"><button class="btn" type="submit">Authorize staff</button></div></form><p class="tiny">Only Super Admin can manage user access. Existing: ${users.length} users.</p></div>`:''}`:''}`;
