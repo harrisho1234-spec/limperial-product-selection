@@ -191,3 +191,69 @@ body.li-auth-unlocked .li-auth-gate{display:none}
   .card-photo{--li-preview-height:140px}
   .preview{--li-preview-height:240px}
 }
+
+/* Team selections compact image-first list (2026-11).
+   One compact review row per record; never stretch the supplier photo. */
+.team-list{display:grid;gap:8px;min-width:0}
+.team-list-head,.team-list-top{
+ display:grid;
+ grid-template-columns:84px minmax(175px,2.1fr) minmax(130px,1.2fr) minmax(126px,1.15fr) minmax(165px,1.6fr);
+ gap:12px;align-items:center;min-width:0
+}
+.team-list-head{padding:0 13px;color:#748092;font-size:10px;font-weight:700;letter-spacing:.045em}
+.team-list-row{background:#fff;border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-width:0}
+.team-list-photo,.team-list-product,.team-list-owner,.team-list-state,.team-list-actions{min-width:0}
+.team-list-photo .selection-thumb,
+.team-list-photo .team-photo-placeholder{
+ width:84px;height:84px;max-width:100%;flex:0 0 84px;
+ border:1px solid #e5e2dd;border-radius:9px;overflow:hidden;background:#f4f1ec
+}
+.team-list-photo .selection-thumb{--li-preview-height:84px;display:flex;align-items:center;justify-content:center}
+.team-list-photo .team-photo-placeholder{font-size:18px}
+.team-list-photo .team-photo-placeholder small{font-size:9px;line-height:1.18;padding:2px 4px}
+.team-list-product{display:grid;gap:2px}
+.team-list-product strong{font-size:13px;font-weight:750;color:#182e45;overflow-wrap:anywhere}
+.team-list-description{font-size:12px;line-height:1.35;color:#38465a;overflow-wrap:anywhere}
+.team-list-owner{font-size:11px;color:#5d6878;line-height:1.35;overflow-wrap:anywhere}
+.team-list-badges{display:flex;flex-wrap:wrap;gap:5px}
+.team-list-badges .pill{font-size:10px;line-height:1.2}
+.team-list-qty{display:block;margin-top:5px;font-size:11px;font-weight:700;color:#415366}
+.team-list-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-start}
+.team-list-actions .btn{font-size:11px;line-height:1.2;padding:7px 9px;white-space:normal;text-align:center}
+.team-list-details{border-top:1px solid #f0efeb;margin-top:8px;padding-top:5px}
+.team-list-details summary{cursor:pointer;display:inline-block;list-style:none;font-size:11px;color:#69768a;padding:2px 4px}
+.team-list-details summary::-webkit-details-marker{display:none}
+.team-list-details summary::before{content:'▸';padding-right:6px}
+.team-list-details[open] summary::before{content:'▾'}
+.team-list-detail-content{padding:7px 4px 4px;display:grid;gap:8px}
+.team-list-notes{font-size:12px;color:#566273;white-space:pre-wrap;overflow-wrap:anywhere}
+.team-list-mobile-label{display:none}
+@media(max-width:1150px){
+ .team-list-head{display:none}
+ .team-list-top{
+  grid-template-columns:74px minmax(0,1fr) minmax(138px,.85fr);
+  grid-template-areas:"photo product state" "photo owner actions";
+  align-items:start;gap:6px 12px
+ }
+ .team-list-photo{grid-area:photo}
+ .team-list-product{grid-area:product}
+ .team-list-owner{grid-area:owner}
+ .team-list-state{grid-area:state}
+ .team-list-actions{grid-area:actions}
+ .team-list-photo .selection-thumb,.team-list-photo .team-photo-placeholder{width:74px;height:80px;flex-basis:74px}
+ .team-list-photo .selection-thumb{--li-preview-height:80px}
+}
+@media(max-width:650px){
+ .team-list-top{
+  grid-template-columns:72px minmax(0,1fr);
+  grid-template-areas:"photo product" "photo owner" "state state" "actions actions";
+  gap:8px 11px
+ }
+ .team-list-row{padding:10px 11px}
+ .team-list-photo .selection-thumb,.team-list-photo .team-photo-placeholder{width:72px;height:82px;flex-basis:72px}
+ .team-list-photo .selection-thumb{--li-preview-height:82px}
+ .team-list-mobile-label{display:block;color:#8190a1;font-size:10px}
+ .team-list-state{display:flex;align-items:center;justify-content:space-between;gap:8px}
+ .team-list-qty{margin-top:0;white-space:nowrap}
+ .team-list-actions .btn{flex:0 1 auto}
+}
