@@ -153,3 +153,41 @@ body.li-auth-unlocked .li-auth-gate{display:none}
  .sidebar nav{display:flex;gap:3px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;padding-bottom:3px}
  .sidebar nav button{flex:0 0 90px;min-width:90px;scroll-snap-align:start}
 }
+
+/* Natural aspect-ratio display for split catalog designs.
+   A square sprite tile can contain 2–3 horizontal or vertical designs.
+   Its cropped segment must not be stretched into a square preview. */
+.card-photo{--li-preview-height:204px}
+.preview{--li-preview-height:210px}
+.selection-thumb{--li-preview-height:126px}
+.mini-photo{--li-preview-height:120px}
+.card-photo:has(> .catalog-crop-window),
+.preview:has(> .catalog-crop-window),
+.selection-thumb:has(> .catalog-crop-window),
+.mini-photo:has(> .catalog-crop-window){
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.card-photo > .catalog-crop-window,
+.preview > .catalog-crop-window,
+.selection-thumb > .catalog-crop-window,
+.mini-photo > .catalog-crop-window{
+  width:min(100%,calc(var(--li-preview-height) * var(--li-crop-aspect,1)));
+  height:auto;
+  max-height:100%;
+  aspect-ratio:var(--li-crop-aspect,1);
+  flex:0 0 auto;
+}
+@media(max-width:900px){
+  .preview{--li-preview-height:180px}
+}
+@media(max-width:600px){
+  .card-photo{--li-preview-height:175px}
+  .preview{--li-preview-height:165px}
+  .selection-thumb{--li-preview-height:100px}
+}
+@media(max-width:390px){
+  .card-photo{--li-preview-height:140px}
+  .preview{--li-preview-height:240px}
+}
