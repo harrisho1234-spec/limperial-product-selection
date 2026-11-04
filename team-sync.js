@@ -494,9 +494,56 @@ async function exportTeamExcel(){
    '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export Excel</button>'+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
- function rowsHTML(){const map=new Map(brands.map(b=>[b.id,b.name]));const visible=filteredTeamRecords().slice(0,200);
+ function rowsHTML(){
+  const map=new Map(brands.map(b=>[b.id,b.name]));
+  const visible=filteredTeamRecords().slice(0,200);
   preloadVisibleTeamPhotos(visible);
-  return visible.map(r=>{const image=teamImageForRecord(r);const img=image?.sprite&&typeof photo==='function'?photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(r);return `<article class="candidate-row team-selection-row"><div class="selection-card-head">${img}<div class="selection-card-copy"><div class="tiny">${esc(map.get(r.brandId)||r.brandId)} · ${esc(r.kind)}</div><strong>${esc(r.code||r.itemId)}</strong><div>${esc(r.name||r.item?.name||'Product')}</div><div class="tiny">${esc(r.dimension||'')} · ${esc(r.ownerEmail)}</div><div class="tiny">${esc(r.updatedAt)} · Revision ${r.revision}</div></div></div><div class="team-tags"><span class="pill ${r.decision==='Approved'?'green':'gold'}">${esc(r.decision)}</span><span class="pill">${esc(r.supplierStatus)}</span><span class="tiny">Qty ${esc(r.qty)}</span></div><div class="tiny">${esc(r.notes||'')}</div>${r.brandId===ACTIVE_BRAND_ID?`<div class="row-actions"><button class="btn quiet small" data-sync-action="import" data-record-id="${esc(r.recordId)}">Use in this brand's selections</button></div>`:''}${hasRole()&&r.decision!=='Approved'&&r.decision!=='Rejected'?`<div class="row-actions"><button class="btn small" data-sync-action="approve" data-record-id="${esc(r.recordId)}">Approve & confirm</button><button class="btn danger small" data-sync-action="reject" data-record-id="${esc(r.recordId)}">Reject</button></div>`:''}${canRemoveShared(r)?`<div class="row-actions"><button type="button" class="btn danger small" data-sync-action="removeShared" data-record-id="${esc(r.recordId)}">Remove from Team selections</button></div>`:''}</article>`}).join('')||'<div class="empty"><h3>No shared selections for this brand</h3><p>Choose All brands or another supplier, or share products from My selections.</p></div>'}
+  const header='<div class="team-list-head" aria-hidden="true"><span>Photo</span><span>Product / Supplier</span><span>Selected by</span><span>Status / Qty</span><span>Review actions</span></div>';
+  const rows=visible.map(r=>{
+   const image=teamImageForRecord(r);
+   const img=image?.sprite&&typeof photo==='function'?
+    photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(r);
+   const brand=map.get(r.brandId)||(typeof BRANDS!=='undefined'?BRANDS.find(b=>b.id===r.brandId)?.name:null)||r.brandId;
+   const canApprove=hasRole()&&r.decision!=='Approved'&&r.decision!=='Rejected';
+   const canImport=r.brandId===ACTIVE_BRAND_ID;
+   const canRemove=canRemoveShared(r);
+   const approve=canApprove?
+    '<button class="btn small" data-sync-action="approve" data-record-id="'+esc(r.recordId)+'">Approve &amp; confirm</button>'+
+    '<button class="btn danger small" data-sync-action="reject" data-record-id="'+esc(r.recordId)+'">Reject</button>':'';
+   const importAction=canImport?
+    '<button class="btn quiet small" data-sync-action="import" data-record-id="'+esc(r.recordId)+'">Use in selections</button>':'';
+   const removeAction=canRemove?
+    '<button type="button" class="btn danger small" data-sync-action="removeShared" data-record-id="'+esc(r.recordId)+'">Remove from Team selections</button>':'';
+   const decision=String(r.decision||'Review');
+   const status=String(r.supplierStatus||'Not requested');
+   const recordName=String(r.name||r.item?.name||'Product');
+   const owner=String(r.ownerEmail||'—');
+   const details='<details class="team-list-details"><summary>More details'+(canRemove?' &amp; remove':'')+'</summary>'+
+    '<div class="team-list-detail-content">'+
+    '<span class="tiny">Last updated: '+esc(r.updatedAt||'—')+' · Revision '+esc(r.revision??'—')+'</span>'+
+    (r.notes?'<div class="team-list-notes">'+esc(r.notes)+'</div>':'')+
+    (removeAction?'<div class="row-actions">'+removeAction+'</div>':'')+
+    '</div></details>';
+   return '<article class="team-list-row" role="listitem">'+
+    '<div class="team-list-top">'+
+     '<div class="team-list-photo" title="Product preview from authorized supplier catalog">'+img+'</div>'+
+     '<div class="team-list-product"><div class="tiny">'+esc(brand)+' · '+esc(r.kind)+'</div>'+
+      '<strong title="'+esc(r.code||r.itemId||'')+'">'+esc(r.code||r.itemId)+'</strong>'+
+      '<div class="team-list-description" title="'+esc(recordName)+'">'+esc(recordName)+'</div>'+
+      (r.dimension?'<span class="tiny">'+esc(r.dimension)+'</span>':'')+'</div>'+
+     '<div class="team-list-owner"><span class="team-list-mobile-label">Selected by</span>'+
+      '<span title="'+esc(owner)+'">'+esc(owner)+'</span></div>'+
+     '<div class="team-list-state"><div class="team-list-badges">'+
+      '<span class="pill '+(decision==='Approved'?'green':decision==='Rejected'?'warn':'gold')+'">'+esc(decision)+'</span>'+
+      '<span class="pill">'+esc(status)+'</span></div>'+
+      '<span class="team-list-qty">Qty '+esc(r.qty??'—')+'</span></div>'+
+     '<div class="team-list-actions">'+(approve||importAction||
+       '<span class="tiny">Reviewed</span>')+(approve&&importAction?importAction:'')+'</div>'+
+    '</div>'+details+'</article>';
+  }).join('');
+  return visible.length?'<div class="team-list" role="list">'+header+rows+'</div>':
+    '<div class="empty"><h3>No shared selections for this brand</h3><p>Choose All brands or another supplier, or share products from My selections.</p></div>';
+ }
  function roleOptions(current){
   return ['Staff','Manager','Admin','Super Admin'].map(r=>
    '<option value="'+esc(r)+'"'+(r===current?' selected':'')+'>'+esc(r)+'</option>').join('');
