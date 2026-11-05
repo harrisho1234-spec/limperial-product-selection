@@ -201,7 +201,17 @@ async function onCredential(credential){if(!credential?.credential)return;token=
     try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
   }
   window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';hasUnlockedOnce=false;paint()}
- async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=data.selections||[];brands=data.brands||[];users=data.users||[];window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
+ function sanitizeTeamRecordPrice(record){
+   if(!record||record.brandId!=='asfour')return record;
+   const item=record.item||{};
+   const source=item.source||((String(record.itemId||'').startsWith('price-')||String(record.recordId||'').includes('|catalog|price-'))?'price':'');
+   if(source!=='price'||typeof cleanAsfourProductName!=='function')return record;
+   const name=cleanAsfourProductName(record.name,source,record.brandId);
+   const itemName=cleanAsfourProductName(item.name,source,record.brandId);
+   if(name===record.name&&itemName===item.name)return record;
+   return {...record,name,item:{...item,name:itemName}};
+ }
+ async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);brands=data.brands||[];users=data.users||[];window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
   // Create lightweight brand records for shared suppliers without overwriting local private catalogs.
   const existing=new Set(BRANDS.map(x=>x.id));let changed=false;for(const b of brands){if(!existing.has(b.id)){BRANDS.push({id:b.id,name:b.name,category:b.category||'Other',shared:true});changed=true}}if(changed)persistBrandDirectory();
   return data}
@@ -255,7 +265,7 @@ async function onCredential(credential){if(!credential?.credential)return;token=
  }
  function recordId(kind,id){return email+'|'+ACTIVE_BRAND_ID+'|'+kind+'|'+id}
  function snapshot(kind,id){if(!PACK)return null;const item=kind==='catalog'?catalogItemForSelection(id):allVariants().find(x=>x.id===id);if(!item)return null;const entry=kind==='catalog'?candidateEntry(item):variantEntry(item);
-  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,code:item.code||'',name:item.name||item.type||'',type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:item.sprite?.atlas?item.sprite.atlas+'#'+item.sprite.index:(item.sourceRef||'')},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
+  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,code:item.code||'',name:typeof cleanAsfourProductName==='function'?cleanAsfourProductName(item.name||item.type||'',item.source,ACTIVE_BRAND_ID):(item.name||item.type||''),type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:item.sprite?.atlas?item.sprite.atlas+'#'+item.sprite.index:(item.sourceRef||'')},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
  async function publish(kind,id){if(!token||!email)return;const data=snapshot(kind,id);if(!data)return;if(!hasRole()&&(data.entry.decision==='Approved'||data.entry.supplierStatus==='Confirmed')){lastError='Only management can approve or confirm products for the team.';status='error';paint();return}
   pending++;try{const response=await call('upsert',data);versions.set(response.recordId,response.revision);status='connected';lastError='';await refresh();paint()}catch(err){status='error';lastError=err.message+' — local copy preserved';paint()}finally{pending--}}
  function itemChanged(kind,id){if(!token)return;publish(kind,id).catch(err=>{lastError=err.message;status='error';paint()})}
