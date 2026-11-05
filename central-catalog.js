@@ -54,7 +54,9 @@
    if(!m||m.brandId!==brandId||m.version!==item.version||!m.catalog||!Array.isArray(m.spriteKeys))throw Error('Catalog version mismatch; refresh team selections');
    if(m.catalog.items.length>6000||m.spriteKeys.length>500)throw Error('Catalog size limit exceeded');
    const sprites=Object.create(null),groups=[];
-   for(let i=0;i<m.spriteKeys.length;i+=4)groups.push(m.spriteKeys.slice(i,i+4));
+   // The private Apps Script bridge caps each sprite response at 1 MB. Two
+   // high-resolution TL atlas sheets stay under this limit while retaining detail.
+   for(let i=0;i<m.spriteKeys.length;i+=2)groups.push(m.spriteKeys.slice(i,i+2));
    progress.set(brandId,{done:0,total:m.spriteKeys.length});errors.delete(brandId);
    if(ACTIVE_BRAND_ID===brandId&&VIEW!=='team')render();
    let next=0;const workers=Array.from({length:Math.min(3,groups.length)},async()=>{
@@ -202,7 +204,7 @@
      const wanted=[...new Set(selected.map(r=>findTeamPhotoItem(lib.items,r)?.sprite?.atlas)
        .filter(k=>k&&lib.keys.has(k)&&!lib.urls[k]))];
      const batches=[];
-     for(let i=0;i<wanted.length;i+=4)batches.push(wanted.slice(i,i+4));
+     for(let i=0;i<wanted.length;i+=2)batches.push(wanted.slice(i,i+2));
      // Fetch only photo sheets referenced by the filtered team selections.
      for(const batch of batches){
        if(!valid())return null;
