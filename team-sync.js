@@ -520,7 +520,7 @@ async function exportTeamExcel(){
    };
    return {
      description:pick(record.name,item.name,item.type),
-     original:pick(record.dimension,item.dimension,e.originalSize,item.originalSize),
+     original:pick(record.dimension,record.originalSize,item.dimension,e.originalSize,item.originalSize),
      requested:pick(record.targetSize,e.targetSize),
      finish:pick(record.finish,e.finish),
      crystal:pick(record.crystal,e.crystal),
@@ -553,9 +553,14 @@ async function exportTeamExcel(){
  }
  function renderTeamDuplicateGroup(group,renderRow){
    const different=teamDuplicateDifferences(group),first=group.records[0];
-   const image=teamImageForRecord(first);
+   // Prefer any available authorized photo among the staff submissions.
+   let image=null,photoRecord=first;
+   for(const record of group.records){
+     image=teamImageForRecord(record);
+     if(image?.sprite){photoRecord=record;break}
+   }
    const img=image?.sprite&&typeof photo==='function'?
-     photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(first);
+     photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(photoRecord);
    const brand=brands.find(b=>b.id===first.brandId)?.name||
     (typeof BRANDS!=='undefined'?BRANDS.find(b=>b.id===first.brandId)?.name:null)||first.brandId||'Supplier';
    const pending=group.records.filter(r=>!['Approved','Rejected'].includes(r.decision)).length;
@@ -576,7 +581,7 @@ async function exportTeamExcel(){
      }).join('')+'</tbody></table></div></div>':
      '<p class="team-dup-same">No differences in product or requested specifications. Staff quantities and approvals remain separate.</p>';
    return '<details class="team-duplicate-group" data-team-duplicate-key="'+esc(group.key)+'"'+(open?' open':'')+'>'+
-     '<summary class="team-duplicate-summary"><span class="team-duplicate-photo">'+img+'</span>'+
+     '<summary class="team-duplicate-summary"><div class="team-duplicate-photo">'+img+'</div>'+
      '<span class="team-duplicate-title"><b>'+esc(brand)+' · '+esc(group.code)+'</b>'+
      '<span>'+group.records.length+' team submissions · '+pending+' awaiting review</span>'+
      '<span class="'+(different.length?'team-dup-different':'team-dup-identical')+'">'+note+'</span></span>'+
