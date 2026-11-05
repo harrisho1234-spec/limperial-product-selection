@@ -23,7 +23,7 @@ function sanitizeAsfourPack(pack,brandId){
  }
  // Keep the supplier name for provenance, but never give the private price-list
  // link as a source action inside Product Selection.
- if(pack.catalog.sources?.price?.url)delete pack.catalog.sources.price.url;
+ if(pack.catalog.sources?.price?.url){delete pack.catalog.sources.price.url;changes++;}
  return changes;
 }
 
