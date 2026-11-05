@@ -136,7 +136,7 @@ function catalogCard(i){
  <div class="card-foot"><button class="btn quiet small" data-action="item" data-id="${q(i.id)}">View details</button>
  <button class="btn small ${added||sel?'secondary':''}" data-action="shortlist" data-id="${q(i.id)}">${added||sel?'✓ Selected':'＋ Select'}</button></div></article>`;
 }
-function renderFamilies(){const ql=SEARCH.toLowerCase();const list=PACK.family.filter(f=>!ql||[f.id,f.name,f.mainCode].join(' ').toLowerCase().includes(ql));$('app').innerHTML=`<div class="toolbar"><div class="search"><input id="familySearch" placeholder="Search preferred family…" value="${q(SEARCH)}"></div>${ACTIVE_BRAND_ID==='asfour'?'<button class="btn secondary" data-action="openDrive">Open original selection file</button>':''}<button class="btn" data-action="newFamily">＋ Create family</button></div><div class="subheading"><h2>${list.length} design families</h2><span class="tiny">${ACTIVE_BRAND_ID==='asfour'?'Imported from Product Performance.xlsx; custom proposals remain unconfirmed':'Custom family designs and supplier references'}</span></div><div class="f-grid">${list.map(f=>{let n=allVariants().filter(v=>v.familyId===f.id).length;return `<article class="f-card"><div class="mini-photo">${sprite(f.sprite)}</div><div class="f-copy"><div class="tiny">${q(f.id)} · ${n} variants</div><h3>${q(f.mainCode||f.name)}</h3><p>Your preferred collection · supplier size confirmation pending</p><button class="btn secondary small" data-action="family" data-id="${q(f.id)}">Review family →</button></div></article>`}).join('')}</div>`}
+function renderFamilies(){const ql=SEARCH.toLowerCase();const list=PACK.family.filter(f=>!ql||[f.id,f.name,f.mainCode].join(' ').toLowerCase().includes(ql));$('app').innerHTML=`<div class="toolbar"><div class="search"><input id="familySearch" placeholder="Search preferred family…" value="${q(SEARCH)}"></div>${ACTIVE_BRAND_ID==='asfour'?'<button class="btn secondary" data-action="openDrive">Open original selection file</button>':''}<button class="btn secondary" data-action="exportFamilies" ${!list.length?'disabled':''}>⬇ Export Excel</button><button class="btn" data-action="newFamily">＋ Create family</button></div><div class="subheading"><h2>${list.length} design families</h2><span class="tiny">${ACTIVE_BRAND_ID==='asfour'?'Imported from Product Performance.xlsx; custom proposals remain unconfirmed':'Custom family designs and supplier references'}</span></div><div class="f-grid">${list.map(f=>{let n=allVariants().filter(v=>v.familyId===f.id).length;return `<article class="f-card"><div class="mini-photo">${sprite(f.sprite)}</div><div class="f-copy"><div class="tiny">${q(f.id)} · ${n} variants</div><h3>${q(f.mainCode||f.name)}</h3><p>Your preferred collection · supplier size confirmation pending</p><button class="btn secondary small" data-action="family" data-id="${q(f.id)}">Review family →</button></div></article>`}).join('')}</div>`}
 function renderSelected(){const items=candidates(), v=allVariants().filter(x=>{const d=variantEntry(x).decision;return d==='Select'||d==='Approved'});$('app').innerHTML=`<div class="statuslist"><div class="statbox"><strong>${items.length}</strong><small>Catalog candidates</small></div><div class="statbox"><strong>${v.length}</strong><small>Family versions selected</small></div><div class="statbox"><strong>${orderRows().length}</strong><small>Approved and confirmed</small></div></div><div class="toolbar"><button class="btn" data-action="exportDraft" ${draftRows().length?'':'disabled'}>⬇ Download selected designs (.xlsx)</button><span class="tiny">Draft only — no supplier confirmation required</span></div><div class="subheading"><h2>Catalog candidates</h2><span class="tiny">Choose any two products to compare</span></div>${items.length?`<div class="row-list">${items.map(i=>candidateCard(i)).join('')}</div>`:'<div class="empty"><h2>No catalog items selected yet</h2><p>Browse Discover to add product codes or catalog pages to your selection.</p><button class="btn secondary" data-action="goto" data-to="discover">Browse catalog</button></div>'}<div class="subheading"><h2>Selected family versions</h2></div>${v.length?`<div class="row-list">${v.map(x=>`<div class="candidate-row selection-item"><div class="selection-card-head">${photo(x.sprite||PACK.family.find(f=>f.id===x.familyId)?.sprite,'selection-thumb')}<div class="selection-card-copy"><strong>${q(x.familyId)} · ${q(x.type)}</strong><div class="tiny">${q(variantEntry(x).code||'Custom code pending')} · ${q(variantEntry(x).targetSize)}</div><div class="row-actions selection-card-actions"><button class="btn quiet small" data-action="family" data-id="${q(x.familyId)}">Review family</button></div></div></div></div>`).join('')}</div>`:'<p class="muted">No family versions selected. Open Design Families to build a collection.</p>'}`}
 function candidateCard(i){let s=candidateEntry(i),checked=S.compare.includes(i.id);return `<article class="candidate-row selection-item"><div class="selection-card-head"><button type="button" class="selection-photo-button" data-action="item" data-id="${q(i.id)}" aria-label="View product image">${photo(i.sprite||i.pageSprite,'selection-thumb')}</button><div class="selection-card-copy"><div class="variant-top"><div><b>${q(s.code||i.name)}</b><div class="selection-description">${q(i.name||i.type||'Catalog product')}</div>${i.isSelectionCopy?`<div class="tiny selection-copy-marker">Duplicate selection · ${q(s.targetSize?'Custom requested size':'Enter custom size')}</div>`:''}<div class="tiny">${q(PACK.sources[i.source]?.name||'Supplier catalog')} · page ${q(i.page??'—')}</div>${i.imageSharedWithVariants?'<div class="tiny">Reference photo; finish may vary</div>':''}</div>${i.isSelectionCopy?'':`<label class="tiny"><input type="checkbox" data-action="compare" data-id="${q(i.id)}" ${checked?'checked':''}> Compare</label>`}</div></div></div><div class="variant-fields"><div class="field"><label>Selection</label>${selectHTML('catalog',i.id,'decision',s.decision,['Review','Select','Skip','Approved'])}</div><div class="field"><label>Supplier confirmation</label>${selectHTML('catalog',i.id,'supplierStatus',s.supplierStatus,['Not requested','Quote requested','Confirmed','Not possible'])}</div><div class="field"><label>Supplier code</label><input data-edit="catalog" data-id="${q(i.id)}" data-key="code" value="${q(s.code)}" placeholder="Required for export"></div><div class="field"><label>Qty (later)</label><input type="number" min="0" data-edit="catalog" data-id="${q(i.id)}" data-key="qty" value="${q(s.qty)}"></div><div class="field"><label>Original size (catalog)</label><input value="${q(i.dimension||'Not specified in catalog')}" readonly aria-label="Original catalog size"></div><div class="field"><label>Requested size (custom)</label><input data-edit="catalog" data-id="${q(i.id)}" data-key="targetSize" value="${q(s.targetSize)}" placeholder="e.g. Ø80 × H90 cm"></div><div class="field span2"><label>Custom request (other changes)</label><input data-edit="catalog" data-id="${q(i.id)}" data-key="request" value="${q(s.request)}" placeholder="Finish, crystal, arms, tiers, drop length…"></div></div><div class="row-actions"><button class="btn quiet small" data-action="item" data-id="${q(i.id)}">View product</button><button class="btn secondary small" data-action="duplicateCandidate" data-id="${q(i.id)}">⧉ Duplicate</button><button class="btn danger small" data-action="removeCandidate" data-id="${q(i.id)}">Remove</button></div></article>`}
 function renderOrder(){const rows=orderRows();const unconfirmed=allVariants().filter(v=>variantEntry(v).decision==='Select'||variantEntry(v).decision==='Approved').filter(v=>!isReady(v)).length + candidates().filter(i=>candidateEntry(i).decision!=='Skip'&&candidateEntry(i).decision!=='Review'&&!rows.some(r=>r.id===i.id)).length;
@@ -162,6 +162,145 @@ function download(name,text,type='application/json'){const blob=new Blob([text],
 function backup(){download('LImperial_'+brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Selections_'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({format:'limperial-selection-backup',version:2,brandId:ACTIVE_BRAND_ID,brandName:brandNow().name,when:new Date().toISOString(),state:S},null,2));toast('Selection backup downloaded for '+brandNow().name)}
 async function restore(file){try{const b=JSON.parse(await file.text());if(b.format!=='limperial-selection-backup'||!b.state)throw Error('Invalid selection backup');if((b.brandId||'asfour')!==ACTIVE_BRAND_ID)throw Error('Backup is for another brand. Open that brand first.');if(!confirm('Replace the selections stored on this browser with the backup?'))return;S=b.state;save();render();toast('Selections restored')}catch(e){alert('Restore failed: '+e.message)}}
 function draftRows(){const chosen=['Select','Approved'];return [...allVariants().filter(v=>chosen.includes(variantEntry(v).decision)).map(item=>({id:item.id,item,entry:variantEntry(item),family:item.familyId})),...candidates().filter(i=>chosen.includes(candidateEntry(i).decision)).map(item=>({id:item.id,item,entry:candidateEntry(item),family:'CATALOG'}))]}
+
+function visibleFamilyExportData(){
+  const matching=String(SEARCH||'').trim().toLowerCase();
+  const families=(PACK?.family||[]).filter(f=>!matching||[f.id,f.name,f.mainCode].join(' ').toLowerCase().includes(matching));
+  const ids=new Set(families.map(f=>f.id));
+  const versions=allVariants().filter(v=>ids.has(v.familyId));
+  return {families,versions};
+}
+function safeExportFileBase(){
+  return 'LImperial_'+String(brandNow().name||'Supplier').replace(/[^a-z0-9_-]/gi,'_')+'_Design_Families_'+new Date().toISOString().slice(0,10);
+}
+function safeCsvCell(value){
+  let s=String(value??'');
+  // Avoid imported supplier text becoming spreadsheet formulas.
+  if(/^\s*[=+\-@]/.test(s))s="'"+s;
+  return '"'+s.replaceAll('"','""')+'"';
+}
+function exportFamiliesCsv(families,versions){
+  const byFamily=new Map();
+  for(const v of versions){if(!byFamily.has(v.familyId))byFamily.set(v.familyId,[]);byFamily.get(v.familyId).push(v)}
+  const rows=[['Family ID','Family name / main code','Family type','Version type','Reference code','Original reference size','Requested size','Finish','Crystal','Decision','Supplier status','Qty','Custom request']];
+  for(const f of families){
+    const variants=byFamily.get(f.id)||[null];
+    for(const v of variants){
+      const e=v?variantEntry(v):null;
+      rows.push([f.id,f.mainCode||f.name,f.style||'Preferred design',v?.type||'',e?.code||v?.code||'',v?.originalSize||v?.supplierSize||v?.dimension||'',e?.targetSize||'',e?.finish||'',e?.crystal||'',e?.decision||'',e?.supplierStatus||'',e?.qty??'',e?.request||'']);
+    }
+  }
+  download(safeExportFileBase()+'.csv','\uFEFF'+rows.map(r=>r.map(safeCsvCell).join(',')).join('\r\n'),'text/csv;charset=utf-8');
+}
+let exportingFamiliesExcel=false;
+async function exportFamiliesExcel(){
+  if(!window.LITeamSync?.status()?.connected)return toast('Sign in to export Design families');
+  if(exportingFamiliesExcel)return;
+  const {families,versions}=visibleFamilyExportData();
+  if(!families.length)return toast('No design families match the current search');
+  const btn=document.querySelector('[data-action="exportFamilies"]');
+  const label=btn?.textContent||'⬇ Export Excel';
+  exportingFamiliesExcel=true;
+  if(btn){btn.disabled=true;btn.textContent='Preparing Excel…'}
+  try{
+    if(!window.ExcelJS){
+      exportFamiliesCsv(families,versions);
+      toast('Excel library unavailable; downloaded CSV without photos');
+      return;
+    }
+    const book=new window.ExcelJS.Workbook();
+    book.creator="L'Imperial Product Selection Studio";
+    const navy={argb:'FF13233A'},white={argb:'FFFFFFFF'},ink={argb:'FF213951'},line={argb:'FFE5E3DF'};
+    const sheet=(name,headers,widths)=>{
+      const ws=book.addWorksheet(name,{views:[{state:'frozen',ySplit:3}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}});
+      ws.columns=widths.map(width=>({width}));
+      const max=String.fromCharCode(64+headers.length);
+      ws.mergeCells('A1:'+max+'1');
+      const h=ws.getCell('A1');
+      h.value="L'IMPERIAL · "+brandNow().name.toUpperCase()+" · "+name.toUpperCase();
+      h.font={bold:true,size:15,color:white};
+      h.fill={type:'pattern',pattern:'solid',fgColor:navy};
+      ws.getRow(1).height=34;
+      ws.mergeCells('A2:'+max+'2');
+      const info=ws.getCell('A2');
+      info.value='Reference only · Photos from the authorized catalog · Supplier prices excluded · Not a purchase order';
+      info.font={italic:true,size:10,color:{argb:'FF65748A'}};
+      ws.getRow(2).height=22;
+      ws.getRow(3).values=headers;
+      ws.getRow(3).font={bold:true,size:10,color:ink};
+      ws.getRow(3).height=27;
+      ws.autoFilter={from:{row:3,column:1},to:{row:3,column:headers.length}};
+      return ws;
+    };
+    const fam=sheet('Design Families',
+      ['No.','Family photo','Family ID','Main code / name','Family style','Variants','Selected / approved'],
+      [7,24,17,31,27,13,22]);
+    const ver=sheet('Family Versions',
+      ['No.','Photo','Family ID','Main family code','Version type','Reference code','Original size','Requested size','Finish','Crystal','Decision','Supplier status','Qty','Custom instructions'],
+      [7,24,16,27,25,27,25,24,19,18,17,20,9,46]);
+    const familyMap=new Map(families.map(f=>[f.id,f]));
+    const versionCount=new Map(),chosenCount=new Map();
+    for(const v of versions){
+      versionCount.set(v.familyId,(versionCount.get(v.familyId)||0)+1);
+      if(['Select','Approved'].includes(variantEntry(v).decision))
+        chosenCount.set(v.familyId,(chosenCount.get(v.familyId)||0)+1);
+    }
+    const addPhoto=async(ws,rowIndex,sprite,column,width=104,height=104)=>{
+      if(!sprite){ws.getCell(rowIndex,column).value='Photo unavailable';return}
+      try{
+        const png=await imageFromSprite(sprite);
+        if(!png){ws.getCell(rowIndex,column).value='Photo unavailable';return}
+        const id=book.addImage({base64:png,extension:'png'});
+        ws.addImage(id,{tl:{col:column-1+0.08,row:rowIndex-1+0.05},ext:{width,height},editAs:'oneCell'});
+      }catch(_){ws.getCell(rowIndex,column).value='Photo unavailable'}
+    };
+    const finishRow=(ws,rowIndex,columns)=>{
+      const row=ws.getRow(rowIndex);
+      row.height=84;
+      row.alignment={vertical:'middle',wrapText:true};
+      for(let column=1;column<=columns;column++){
+        const cell=ws.getCell(rowIndex,column);
+        cell.border={bottom:{style:'thin',color:line}};
+      }
+      if(rowIndex%2===0){
+        for(let column=1;column<=columns;column++){
+          ws.getCell(rowIndex,column).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF9F8F5'}};
+        }
+      }
+    };
+    for(let n=0;n<families.length;n++){
+      const f=families[n],i=n+4;
+      fam.getRow(i).values=[n+1,'',f.id,f.mainCode||f.name,f.style||'Preferred design',
+        versionCount.get(f.id)||0,chosenCount.get(f.id)||0];
+      finishRow(fam,i,7);
+      await addPhoto(fam,i,f.sprite,2,105,105);
+    }
+    for(let n=0;n<versions.length;n++){
+      const v=versions[n],i=n+4,e=variantEntry(v),f=familyMap.get(v.familyId);
+      ver.getRow(i).values=[n+1,'',v.familyId,f?.mainCode||f?.name||'',
+        v.type||'',e.code||v.code||'',
+        v.originalSize||v.supplierSize||v.dimension||'',
+        e.targetSize||'',e.finish||'',e.crystal||'',e.decision||'Review',
+        e.supplierStatus||'Not requested',e.qty??0,e.request||''];
+      finishRow(ver,i,14);
+      await addPhoto(ver,i,v.sprite||f?.sprite,2,105,105);
+    }
+    const data=await book.xlsx.writeBuffer();
+    const blob=new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url=URL.createObjectURL(blob),link=document.createElement('a');
+    link.href=url;link.download=safeExportFileBase()+'.xlsx';
+    document.body.appendChild(link);link.click();link.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),15000);
+    toast('Exported '+families.length+' families and '+versions.length+' versions with photos');
+  }catch(err){
+    console.error('Design families export failed',err);
+    exportFamiliesCsv(families,versions);
+    toast('Excel export failed; downloaded CSV without photos');
+  }finally{
+    exportingFamiliesExcel=false;
+    if(btn){btn.disabled=false;btn.textContent=label}
+  }
+}
 function exportDraftCsv(rows){
   // CSV cannot embed product photos, but uses the same six informational fields as the Excel export.
   const header=['No.','Code','Original size','Requested size','Qty','Crystal / finish','Custom request'];
@@ -249,7 +388,7 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
   keepViewport();
   requestAnimationFrame(keepViewport);
   break;
-}case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'item':itemDrawer(id);break;case 'family':familyDrawer(id);break;case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{if(!selectionForItem(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}S.catalog[id]=candidateEntry(item);S.catalog[id].decision='Select';if(!S.shortlist.includes(id))S.shortlist.push(id)}else{toast('Already in My selections');break}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
+}case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'item':itemDrawer(id);break;case 'family':familyDrawer(id);break;case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{if(!selectionForItem(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}S.catalog[id]=candidateEntry(item);S.catalog[id].decision='Select';if(!S.shortlist.includes(id))S.shortlist.push(id)}else{toast('Already in My selections');break}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportFamilies':await exportFamiliesExcel();break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
 document.addEventListener('change',async e=>{if(!window.LITeamSync?.status()?.connected)return;const t=e.target;if(t.id==='packFile'&&t.files[0]){await importCatalog(t.files[0]);t.value='';return}if(t.id==='restoreFile'&&t.files[0]){await restore(t.files[0]);t.value='';return}if(t.id==='brandCatalogFiles'&&t.files.length){await uploadBrandFiles(t.files);t.value='';return}if(t.dataset.action==='productPhoto'&&t.files[0]){try{await updateManualProductPhoto(t.dataset.id,t.files[0])}catch(err){alert('Photo upload failed: '+err.message)}t.value='';return}if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={};if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}S[collection][t.dataset.id][t.dataset.key]=t.dataset.key==='qty'?Math.max(0,Number(t.value)||0):t.value;save();window.LITeamSync?.itemChanged(collection==='catalog'?'catalog':'variant',t.dataset.id);if(VIEW==='order')renderOrder();return}});
 document.addEventListener('input',e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='catalogSearch'){SEARCH=e.target.value;LIMIT=48;const start=e.target.selectionStart;renderDiscover();$('catalogSearch').focus();$('catalogSearch').setSelectionRange(start,start)}if(e.target.id==='familySearch'){SEARCH=e.target.value;renderFamilies();$('familySearch').focus()}});
 document.addEventListener('submit',async e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='addBrandForm'){e.preventDefault();try{await addNewBrand(e.target)}catch(err){alert('Unable to add brand: '+err.message)}return}if(e.target.id==='newBrandProductForm'){e.preventDefault();try{await addManualProduct(e.target)}catch(err){alert('Unable to add product: '+err.message)}return}if(e.target.id==='newFamilyForm'){e.preventDefault();try{await createFamily(e.target)}catch(err){alert('Unable to create family: '+err.message)}return}if(e.target.id==='newCustomForm'){e.preventDefault();let d=new FormData(e.target),fid=MODAL?.id;if(!fid)return;const family=PACK.family.find(f=>f.id===fid);let id='CUSTOM-'+Date.now().toString(36);let v={id,familyId:fid,type:String(d.get('type')),code:String(d.get('code')),targetSize:String(d.get('size')),request:String(d.get('request')),finish:'',crystal:'',spec:'',sourceRef:'User proposed size',referenceKind:'CUSTOM DESIGN — not a supplier standard',isCustomProposal:true,supplierStatus:'Not requested',decision:'Review',qty:0,sprite:family.sprite};S.manual.push(v);save();toast('Custom version added; supplier confirmation required');familyDrawer(fid)}});
