@@ -497,12 +497,100 @@ async function exportTeamExcel(){
    '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export Excel</button>'+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
+
+ const TEAM_DUP_OPEN=new Map();
+ function teamCodeKey(record){
+   const value=String(record?.code||record?.entry?.code||record?.item?.code||'').trim();
+   return value?value.replace(/\s+/g,'').toUpperCase():'';
+ }
+ const teamSpecFields=[
+   {key:'description',label:'Description'},
+   {key:'original',label:'Original size'},
+   {key:'requested',label:'Requested size'},
+   {key:'finish',label:'Finish'},
+   {key:'crystal',label:'Crystal'},
+   {key:'request',label:'Custom instructions'},
+   {key:'notes',label:'Additional notes'}
+ ];
+ function teamSelectionSpecification(record){
+   const e=record?.entry||{},item=record?.item||{};
+   const pick=(...values)=>{
+     for(const v of values)if(v!==null&&v!==undefined&&String(v).trim())return String(v).trim();
+     return '';
+   };
+   return {
+     description:pick(record.name,item.name,item.type),
+     original:pick(record.dimension,item.dimension,e.originalSize,item.originalSize),
+     requested:pick(record.targetSize,e.targetSize),
+     finish:pick(record.finish,e.finish),
+     crystal:pick(record.crystal,e.crystal),
+     request:pick(record.request,e.request),
+     notes:pick(record.notes)
+   };
+ }
+ function teamDuplicateGroups(visible){
+   const map=new Map(),groups=[];
+   for(const record of visible){
+     const code=teamCodeKey(record),brand=String(record.brandId||'').toLowerCase();
+     // Missing product codes are never presumed to describe the same design.
+     if(!code){
+       groups.push({key:'',code:'',brand,records:[record]});
+       continue;
+     }
+     const key=brand+'::'+code;
+     let group=map.get(key);
+     if(!group){group={key,code:String(record.code||record.entry?.code||record.item?.code||'').trim(),brand,records:[]};map.set(key,group);groups.push(group)}
+     group.records.push(record);
+   }
+   return groups;
+ }
+ function teamDuplicateDifferences(group){
+   const specs=group.records.map(teamSelectionSpecification);
+   const normalize=value=>String(value||'').trim().replace(/\s+/g,' ').toLowerCase();
+   return teamSpecFields.filter(field=>
+     new Set(specs.map(spec=>normalize(spec[field.key]))).size>1
+   );
+ }
+ function renderTeamDuplicateGroup(group,renderRow){
+   const different=teamDuplicateDifferences(group),first=group.records[0];
+   const image=teamImageForRecord(first);
+   const img=image?.sprite&&typeof photo==='function'?
+     photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(first);
+   const brand=brands.find(b=>b.id===first.brandId)?.name||
+    (typeof BRANDS!=='undefined'?BRANDS.find(b=>b.id===first.brandId)?.name:null)||first.brandId||'Supplier';
+   const pending=group.records.filter(r=>!['Approved','Rejected'].includes(r.decision)).length;
+   const open=TEAM_DUP_OPEN.has(group.key)?TEAM_DUP_OPEN.get(group.key):different.length>0;
+   const differenceLabels=different.map(f=>f.label).join(', ');
+   const note=different.length?
+     'Different details: '+esc(differenceLabels):
+     'Same product specifications across these submissions';
+   const displayValue=v=>v?esc(v):'<span class="team-dup-unspecified">Not specified</span>';
+   const compare=different.length?'<div class="team-dup-comparison">'+
+     '<div class="team-dup-comparison-title">Compare the differences before approving</div>'+
+     '<div class="team-dup-table-scroll"><table class="team-dup-table"><thead><tr><th>Selected by</th><th>Qty</th>'+
+     different.map(f=>'<th>'+esc(f.label)+'</th>').join('')+'</tr></thead><tbody>'+
+     group.records.map(r=>{
+       const spec=teamSelectionSpecification(r);
+       return '<tr><td>'+esc(r.ownerEmail||'—')+'</td><td>'+esc(r.qty??r.entry?.qty??'—')+'</td>'+
+        different.map(f=>'<td>'+displayValue(spec[f.key])+'</td>').join('')+'</tr>';
+     }).join('')+'</tbody></table></div></div>':
+     '<p class="team-dup-same">No differences in product or requested specifications. Staff quantities and approvals remain separate.</p>';
+   return '<details class="team-duplicate-group" data-team-duplicate-key="'+esc(group.key)+'"'+(open?' open':'')+'>'+
+     '<summary class="team-duplicate-summary"><span class="team-duplicate-photo">'+img+'</span>'+
+     '<span class="team-duplicate-title"><b>'+esc(brand)+' · '+esc(group.code)+'</b>'+
+     '<span>'+group.records.length+' team submissions · '+pending+' awaiting review</span>'+
+     '<span class="'+(different.length?'team-dup-different':'team-dup-identical')+'">'+note+'</span></span>'+
+     '<span class="team-duplicate-expand">'+(open?'Review entries':'Open entries')+'</span></summary>'+
+     '<div class="team-duplicate-body">'+compare+
+     '<div class="team-duplicate-records" role="list">'+group.records.map(renderRow).join('')+'</div></div></details>';
+ }
+
  function rowsHTML(){
   const map=new Map(brands.map(b=>[b.id,b.name]));
   const visible=filteredTeamRecords().slice(0,200);
   preloadVisibleTeamPhotos(visible);
   const header='<div class="team-list-head" aria-hidden="true"><span>Photo</span><span>Product / Supplier</span><span>Selected by</span><span>Status / Qty</span><span>Review actions</span></div>';
-  const rows=visible.map(r=>{
+  const renderRow=r=>{
    const image=teamImageForRecord(r);
    const img=image?.sprite&&typeof photo==='function'?
     photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(r);
@@ -521,10 +609,15 @@ async function exportTeamExcel(){
    const status=String(r.supplierStatus||'Not requested');
    const recordName=String(r.name||r.item?.name||'Product');
    const owner=String(r.ownerEmail||'—');
+   const spec=teamSelectionSpecification(r);
+   const showSpec=(name,val)=>val?'<div class="team-list-request-line"><b>'+name+':</b> '+esc(val)+'</div>':'';
+   const specInfo=showSpec('Requested size',spec.requested)+showSpec('Finish',spec.finish)+
+    showSpec('Crystal',spec.crystal)+showSpec('Custom instructions',spec.request)+
+    showSpec('Additional notes',spec.notes);
    const details='<details class="team-list-details"><summary>More details'+(canRemove?' &amp; remove':'')+'</summary>'+
     '<div class="team-list-detail-content">'+
     '<span class="tiny">Last updated: '+esc(r.updatedAt||'—')+' · Revision '+esc(r.revision??'—')+'</span>'+
-    (r.notes?'<div class="team-list-notes">'+esc(r.notes)+'</div>':'')+
+    (specInfo?'<div class="team-list-request-details">'+specInfo+'</div>':'')+
     (removeAction?'<div class="row-actions">'+removeAction+'</div>':'')+
     '</div></details>';
    return '<article class="team-list-row" role="listitem">'+
@@ -543,7 +636,11 @@ async function exportTeamExcel(){
      '<div class="team-list-actions">'+(approve||importAction||
        '<span class="tiny">Reviewed</span>')+(approve&&importAction?importAction:'')+'</div>'+
     '</div>'+details+'</article>';
-  }).join('');
+  };
+  const groups=teamDuplicateGroups(visible);
+  const rows=groups.map(group=>
+    group.records.length===1?renderRow(group.records[0]):renderTeamDuplicateGroup(group,renderRow)
+  ).join('');
   return visible.length?'<div class="team-list" role="list">'+header+rows+'</div>':
     '<div class="empty"><h3>No shared selections for this brand</h3><p>Choose All brands or another supplier, or share products from My selections.</p></div>';
  }
@@ -602,6 +699,11 @@ async function exportTeamExcel(){
   root.innerHTML=`<div class="candidate-row"><div class="variant-top"><div><h2>Shared Team Selections</h2><p class="tiny" id="teamSyncNotice">${esc(email&&role?'Signed in as '+email+' · '+role:token?'Verifying Google sign-in and team access…':'Sign in with Google to access team selections')}</p>${lastError?`<p class="alert">${esc(lastError)}</p><div class="row-actions"><button class="btn secondary small" data-sync-action="openBridgePopup">Open secure Google connection window</button><a class="btn quiet small" href="'+esc(config.scriptUrl)+'" target="_blank" rel="noopener">Check deployed Web App URL</a></div>`:''}</div><div class="row-actions">${role==='Super Admin'?'<button class="btn quiet small" data-sync-action="reconfigure">Connection settings</button>':''}${token?'<button class="btn quiet small" data-sync-action="signout">Sign out</button>':''}</div></div>${!token?'<div id="liGoogleSignIn" style="min-height:50px;margin:12px 0"></div><p id="teamSyncConnectError" class="alert" hidden></p><div class="row-actions"><button class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button><button class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button></div>':email&&role?`<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button><button class="btn small" data-sync-action="publish">Share my current ${esc(brandNow().name)} selections</button><span class="tiny">Last refreshed: ${esc(lastFetched||'—')} · ${records.length} records</span></div>`:'<div class="row-actions"><button class="btn secondary small" data-sync-action="retryConnection">Retry team connection</button><span class="tiny">Google account received; checking team authorization</span></div>'}<p class="tiny">Approved staff can browse private supplier catalogs after Google sign-in. New selections and edits sync while signed in; previously saved local drafts are not bulk-published automatically.</p></div>${email&&role?`<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>${teamBrandFilterToolbar()}<div class="row-list">${rowsHTML()}</div>${adminCatalogForm()}`:''}`;
   if(!token){const slot=document.getElementById('liGoogleSignIn');if(slot)slot.insertAdjacentHTML('afterend',repairClientMarkup());showGoogleButton();if(!signInStarted&&status!=='error'){signInStarted=true;connectButton().catch(e=>{status='error';lastError=e.message;paint()})}}}
  document.addEventListener('submit',e=>{if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target);return}if(e.target.matches('[data-team-edit-form]')){e.preventDefault();saveEditedUser(e.target);return}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
+ document.addEventListener('toggle',event=>{
+   const detail=event.target;
+   if(detail?.matches?.('details[data-team-duplicate-key]'))
+     TEAM_DUP_OPEN.set(detail.dataset.teamDuplicateKey,detail.open);
+ },true);
  document.addEventListener('change',e=>{
   if(e.target?.id!=='liTeamBrandFilter')return;
   teamBrandFilter=e.target.value||'all';
