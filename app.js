@@ -135,7 +135,8 @@ function renderDiscover(){
   </select>`:'';
  const note=ACTIVE_BRAND_ID==='asfour'?
    `${informationCount} confirmed editorial pages separated; all original records and selections are preserved.`:
-   'Codes from 2025 list · image-only pages require supplier verification';
+   ACTIVE_BRAND_ID==='tl'?'Tong Luo · 260 visual page references; some pages show multiple designs. Confirm the exact model code and dimensions before ordering.':
+   'Scanned catalogs may contain visual references needing supplier verification';
  const items=filteredCatalogItems(),visible=items.slice(0,LIMIT);
  $('app').innerHTML=`${pricePhotoNotice()}<div class="toolbar"><div class="search">
    <input id="catalogSearch" placeholder="Search product code, style or size…" value="${q(SEARCH)}"></div>
