@@ -191,7 +191,11 @@ function visibleFamilyExportData(){
   const matching=String(SEARCH||'').trim().toLowerCase();
   const families=(PACK?.family||[]).filter(f=>!matching||[f.id,f.name,f.mainCode].join(' ').toLowerCase().includes(matching));
   const ids=new Set(families.map(f=>f.id));
-  const versions=allVariants().filter(v=>ids.has(v.familyId));
+  const candidates=allVariants().filter(v=>ids.has(v.familyId));
+  const versions=ACTIVE_BRAND_ID==='asfour'?families.flatMap(f=>{
+    const sameFamily=candidates.filter(v=>v.familyId===f.id);
+    return FAMILY_SHOW_ALL_VARIANTS.has(f.id)?sameFamily:familyVariantRows(sameFamily).visible;
+  }):candidates;
   return {families,versions};
 }
 function safeExportFileBase(){
