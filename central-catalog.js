@@ -70,6 +70,8 @@
    });
    await Promise.all(workers);
    const pack=preserveManual({catalog:m.catalog,sprites,metadata:{centralManaged:true,centralVersion:m.version,brandId}},existing);
+   // Remove validated supplier price text BEFORE this pack reaches local cache.
+   if(typeof sanitizeAsfourPack==='function')sanitizeAsfourPack(pack,brandId);
    if(DB)await tx(brandKey(brandId),pack);
    readyPack(brandId,pack);
    return {cached:false,count:pack.catalog.items.length};
@@ -186,8 +188,10 @@
          throw Error('Invalid authorized catalog response');
        // Retain only photo lookup fields, not supplier price or cost data.
        const items=manifest.catalog.items.map(i=>({
-         id:i.id,code:i.code,name:i.name,page:i.page,
-         sprite:i.sprite
+         id:i.id,code:i.code,
+         name:typeof cleanAsfourProductName==='function'?
+           cleanAsfourProductName(i.name,i.source,brandId):i.name,
+         page:i.page,sprite:i.sprite
        }));
        lib={version:meta.version,items,keys:new Set(manifest.spriteKeys),urls:Object.create(null)};
        const prior=teamPhotoPacks.get(brandId);
