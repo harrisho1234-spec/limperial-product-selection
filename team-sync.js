@@ -399,12 +399,13 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   });
 }
 function exportTeamCsv(items){
-  const headers=['No.','Brand','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request','Selection status','Supplier status','Submitted by','Last updated'];
-  const data=items.map(r=>[r.number,r.brand,r.code,r.description,r.original,r.requested,r.qty,r.finish,r.request,r.decision,r.supplierStatus,r.owner,r.updated]);
+  // Match the supplied nine-column Team Selections workbook.
+  // CSV cannot embed photos; the Product photo cells remain empty.
+  const headers=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request'];
+  const data=items.map(r=>[r.number,'',r.code,r.description,r.original,r.requested,r.qty,r.finish,r.request]);
   const safe=v=>{
     let value=String(v??'');
-    // Avoid opening imported staff notes as spreadsheet formulas.
-    if(/^[\s]*[=+\-@]/.test(value))value="'"+value;
+    if(/^\s*[=+\-@]/.test(value))value="'"+value;
     return '"'+value.replace(/"/g,'""')+'"';
   };
   const csv=[headers,...data].map(row=>row.map(safe).join(',')).join('\r\n');
@@ -424,8 +425,12 @@ async function exportTeamExcel(){
   const button=document.querySelector('[data-sync-action="exportTeamExcel"]');
   if(button){button.disabled=true;button.textContent='Preparing Excel…'}
   try{
-    if(!window.ExcelJS){exportTeamCsv(items);alert('The Excel library did not load. A CSV without photos has been downloaded instead.');return}
-    // Make a best effort to load each filtered brand's approved photos before export.
+    if(!window.ExcelJS){
+      exportTeamCsv(items);
+      alert('The Excel library did not load. A CSV without photos has been downloaded instead.');
+      return;
+    }
+    // Use the already-authorized catalog photos from the existing secure loader.
     if(button)button.textContent='Loading approved photos…';
     const recordList=items.map(x=>x.record);
     const otherBrands=[...new Set(recordList.map(r=>r.brandId))].filter(id=>id!==ACTIVE_BRAND_ID);
@@ -435,39 +440,37 @@ async function exportTeamExcel(){
     if(button)button.textContent='Preparing Excel…';
     const book=new window.ExcelJS.Workbook();
     book.creator="L'Imperial Product Selection Studio";
-    const sheet=book.addWorksheet('Team Selections',{views:[{state:'frozen',ySplit:3}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}});
-    sheet.mergeCells('A1:N1');
-    const header=sheet.getCell('A1');
-    header.value="L'IMPERIAL · TEAM PRODUCT SELECTIONS · "+(teamBrandFilter==='all'?'ALL BRANDS':items[0].brand.toUpperCase());
-    header.font={bold:true,size:14,color:{argb:'FFFFFFFF'}};
-    header.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF13233A'}};
-    sheet.getRow(1).height=35;
-    sheet.mergeCells('A2:N2');
-    sheet.getCell('A2').value='Shared team review · '+items.length+' selections · Exported '+new Date().toLocaleString()+' · Not a supplier purchase order · Supplier prices excluded';
-    sheet.getCell('A2').font={italic:true,color:{argb:'FF63758B'},size:10};
-    sheet.getRow(2).height=22;
-    sheet.getRow(3).values=['No.','Product photo','Brand','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request','Selection status','Supplier status','Submitted by','Last updated'];
-    sheet.getRow(3).font={bold:true,color:{argb:'FF17304D'}};
-    sheet.getRow(3).height=28;
-    sheet.columns=[{width:7},{width:22},{width:17},{width:27},{width:35},{width:20},{width:22},{width:9},{width:23},{width:42},{width:19},{width:19},{width:30},{width:27}];
+    const sheet=book.addWorksheet('Team Selections',{
+      views:[{state:'frozen',ySplit:1}],
+      pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}
+    });
+    // Match the supplied example exactly: one header row and nine columns.
+    // No report title, metadata, staff, status or exported-date columns.
+    sheet.columns=[{width:7},{width:22},{width:27},{width:35},{width:20},{width:22},{width:9},{width:23},{width:42}];
+    sheet.getRow(1).values=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request'];
+    sheet.getRow(1).font={bold:true,color:{argb:'FF17304D'},size:11};
+    sheet.getRow(1).alignment={vertical:'middle'};
+    sheet.getRow(1).height=28;
     for(let n=0;n<items.length;n++){
-      const info=items[n],i=n+4,row=sheet.getRow(i);
-      row.values=[info.number,'',info.brand,info.code,info.description,info.original,info.requested,info.qty,info.finish,info.request,info.decision,info.supplierStatus,info.owner,info.updated];
+      const info=items[n],i=n+2,row=sheet.getRow(i);
+      row.values=[info.number,'',info.code,info.description,info.original,info.requested,info.qty,info.finish,info.request];
       row.height=83;
       row.alignment={vertical:'middle',wrapText:true};
-      for(let col=1;col<=14;col++)sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
-      // Only a photo delivered by the authenticated catalog service can be embedded.
-      // Never retrieve a supplier PDF or guess a public image URL.
+      for(let col=1;col<=9;col++){
+        sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
+      }
+      // Never embed original price-list PDFs or unapproved external URLs.
+      // A missing approved image leaves an empty cell, as in the example.
       const image=teamImageForRecord(info.record);
       if(image?.sprite&&typeof imageFromSprite==='function'){
         try{
           const data=await imageFromSprite(image.sprite,image.urls);
           if(data){
             const imageId=book.addImage({base64:data,extension:'png'});
-            sheet.addImage(imageId,{tl:{col:1.16,row:i-1+0.06},ext:{width:92,height:92},editAs:'oneCell'});
-          }else sheet.getCell(i,2).value='Photo not loaded';
-        }catch(_){sheet.getCell(i,2).value='Photo not loaded'}
-      }else sheet.getCell(i,2).value='Photo not loaded';
+            sheet.addImage(imageId,{tl:{col:1.06,row:i-1+0.05},ext:{width:92,height:92},editAs:'oneCell'});
+          }
+        }catch(err){console.warn('Unable to include approved product photo',err)}
+      }
     }
     const buf=await book.xlsx.writeBuffer();
     const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
