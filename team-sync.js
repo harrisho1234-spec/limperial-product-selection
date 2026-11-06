@@ -405,7 +405,20 @@ function exportTeamCsv(items){
   document.body.appendChild(link);link.click();link.remove();
   setTimeout(()=>URL.revokeObjectURL(url),15000);
 }
-let exportingTeamExcel=false;
+let teamCostView='without',teamCostLookup=new Map();
+ async function loadTeamCosts(){
+  if(!['Super Admin','Admin'].includes(role)||!window.LISelectionCosts?.authorized()){teamCostView='without';teamCostLookup=new Map();return}
+  teamCostLookup=await window.LISelectionCosts.fetchRows(filteredTeamRecords());
+ }
+ async function setTeamCost(recordId){
+  if(!['Super Admin','Admin'].includes(role)||!window.LISelectionCosts?.authorized())return alert('Supplier cost access denied.');
+  const rec=records.find(r=>r.recordId===recordId&&!r.deleted);if(!rec)return;
+  const old=window.LISelectionCosts.costFor(rec,teamCostLookup);
+  const amount=prompt('Supplier unit cost in USD for '+(rec.code||rec.itemId),old?.unit_cost??'');
+  if(amount===null)return;
+  try{await window.LISelectionCosts.save(rec,amount,'USD');await loadTeamCosts();paint()}catch(e){alert(e.message)}
+ }
+ let exportingTeamExcel=false;
 async function exportTeamExcel(mode='without'){
   if(!['with','without'].includes(mode))throw Error('Invalid export mode');
   if(mode==='with'&&!window.LISelectionCosts?.authorized())return alert('Supplier costs require Supabase Admin or Super Admin access.');
@@ -623,6 +636,13 @@ async function exportTeamExcel(mode='without'){
    const recordName=String(r.name||r.item?.name||'Product');
    const owner=String(r.ownerEmail||'—');
    const spec=teamSelectionSpecification(r);
+   const costAllowed=['Super Admin','Admin'].includes(role)&&window.LISelectionCosts?.authorized();
+   const rowCost=costAllowed&&teamCostView==='with'?window.LISelectionCosts.costFor(r,teamCostLookup):null;
+   const values=rowCost?window.LISelectionCosts.unitTotal(r,rowCost):null;
+   const costLine=costAllowed&&teamCostView==='with'?'<div class="tiny">Supplier cost: '+
+    (values?.unit!=null?esc((values.currency||'USD')+' '+values.unit.toFixed(2))+
+      ' · Total '+esc((values.currency||'USD')+' '+(values.total??0).toFixed(2)):'Not entered')+'</div>':'';
+   const editCost=costAllowed?'<button type="button" class="btn quiet small" data-sync-action="setSupplierCost" data-record-id="'+esc(r.recordId)+'">Set supplier cost</button>':'';
    const showSpec=(name,val)=>val?'<div class="team-list-request-line"><b>'+name+':</b> '+esc(val)+'</div>':'';
    const specInfo=showSpec('Requested size',spec.requested)+showSpec('Finish',spec.finish)+
     showSpec('Crystal',spec.crystal)+showSpec('Custom instructions',spec.request)+
@@ -631,6 +651,7 @@ async function exportTeamExcel(mode='without'){
     '<div class="team-list-detail-content">'+
     '<span class="tiny">Last updated: '+esc(r.updatedAt||'—')+' · Revision '+esc(r.revision??'—')+'</span>'+
     (specInfo?'<div class="team-list-request-details">'+specInfo+'</div>':'')+
+    (editCost?'<div class="row-actions">'+editCost+'</div>':'')+
     (removeAction?'<div class="row-actions">'+removeAction+'</div>':'')+
     '</div></details>';
    return '<article class="team-list-row" role="listitem">'+
@@ -639,7 +660,7 @@ async function exportTeamExcel(mode='without'){
      '<div class="team-list-product"><div class="tiny">'+esc(brand)+' · '+esc(r.kind)+'</div>'+
       '<strong title="'+esc(r.code||r.itemId||'')+'">'+esc(r.code||r.itemId)+'</strong>'+
       '<div class="team-list-description" title="'+esc(recordName)+'">'+esc(recordName)+'</div>'+
-      (r.dimension?'<span class="tiny">'+esc(r.dimension)+'</span>':'')+'</div>'+
+      (r.dimension?'<span class="tiny">'+esc(r.dimension)+'</span>':'')+costLine+'</div>'+
      '<div class="team-list-owner"><span class="team-list-mobile-label">Selected by</span>'+
       '<span title="'+esc(owner)+'">'+esc(owner)+'</span></div>'+
      '<div class="team-list-state"><div class="team-list-badges">'+
