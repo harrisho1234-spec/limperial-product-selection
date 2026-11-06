@@ -44,13 +44,44 @@ function variantEntry(v){return Object.assign({decision:'Review',supplierStatus:
 function isReady(v){const s=variantEntry(v);return s.decision==='Approved'&&s.supplierStatus==='Confirmed'&&Number(s.qty)>0&&!!s.code.trim()}
 function isCatalogCopy(id){return !!S.catalogDuplicates?.[id]}
 function selectionForItem(id){return isCatalogCopy(id)?S.catalogDuplicates[id]:S.catalog[id]}
+// Individual TL product picks are selection records, never edits to the scanned
+// master catalog. The position is normalized within the original printed page.
+function validTLCrop(value){
+ if(!Array.isArray(value)||value.length!==4)return null;
+ const r=value.map(Number);
+ return r.every(Number.isFinite)&&r[0]>=0&&r[1]>=0&&r[2]>=0.06&&r[3]>=0.06&&r[0]+r[2]<=1.001&&r[1]+r[3]<=1.001?r:null;
+}
+function tlCropSourceRef(parentId,rect){
+ const crop=validTLCrop(rect);
+ return crop?'tlcrop:'+encodeURIComponent(parentId)+':'+crop.map(n=>n.toFixed(4)).join(','):'';
+}
+function parseTLSourceRef(ref){
+ const m=/^tlcrop:([^:]{1,160}):([0-9.,]+)$/.exec(String(ref||''));
+ if(!m)return null;
+ let parentId;
+ try{parentId=decodeURIComponent(m[1])}catch(_){return null}
+ const crop=validTLCrop(m[2].split(',').map(Number));
+ return crop?{parentId,crop}:null;
+}
+window.LITLPicker={parseRef:parseTLSourceRef};
 function catalogItemForSelection(id){
  const real=PACK?.items?.find(i=>i.id===id);
  if(real)return real;
  const entry=S.catalogDuplicates?.[id];
  if(!entry)return null;
  const source=PACK?.items?.find(i=>i.id===entry.sourceItemId);
- return source?{...source,id,sourceItemId:source.id,isSelectionCopy:true}:null;
+ if(!source)return null;
+ const crop=validTLCrop(entry.tlCrop);
+ if(crop&&ACTIVE_BRAND_ID==='tl'){
+  return {...source,id,sourceItemId:source.id,isSelectionCopy:true,
+   code:String(entry.code||'').trim(),
+   name:String(entry.tlName||'Tong Luo individual chandelier'),
+   sprite:{...source.sprite,cropRect:crop},
+   sourceRef:tlCropSourceRef(source.id,crop),
+   verification:entry.code?'Individual model · verify printed supplier code':'Supplier code needs verification',
+   photoKind:'catalog-crop'};
+ }
+ return {...source,id,sourceItemId:source.id,isSelectionCopy:true};
 }
 function candidateEntry(item){
  const entry=selectionForItem(item.id)||{};
