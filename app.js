@@ -29,6 +29,7 @@ function sanitizeAsfourPack(pack,brandId){
 
 let PACK=null,ACTIVE_PACK=null,DB=null,SPRITES={},VIEW='discover',SEARCH='',SRC='all',KIND='all',LIMIT=48,MODAL=null;
 let ASFOUR_REFERENCE_FILTER='products';
+let TL_CATALOG_VIEW='products';
 let S=readState();
 function readState(){try{return Object.assign({family:{},variants:{},catalog:{},shortlist:[],manual:[],compare:[]},JSON.parse(localStorage.getItem(stateKey(ACTIVE_BRAND_ID))||'{}'))}catch(e){return {family:{},variants:{},catalog:{},shortlist:[],manual:[],compare:[]}}}
 function save(){localStorage.setItem(stateKey(ACTIVE_BRAND_ID),JSON.stringify(S)); updateBadges();window.LITeamSync?.localSaved()}
@@ -150,7 +151,8 @@ function isAsfourInformationPage(item){
   ASFOUR_CONFIRMED_INFORMATION_PAGES.has(String(item.id))&&
   String(item.name||'').startsWith('Chandeliers Collections (2020)');
 }
-function filteredCatalogItems(){return PACK.items.filter(x=>!x.splitParent&&
+function filteredCatalogItems(){return PACK.items.filter(x=>
+ (ACTIVE_BRAND_ID==='tl'? (TL_CATALOG_VIEW==='pages'?!!x.tlPageReference:!!x.tlIndividualModel):!x.splitParent)&&
  (ACTIVE_BRAND_ID!=='asfour'||ASFOUR_REFERENCE_FILTER==='all'||
    (ASFOUR_REFERENCE_FILTER==='information'?isAsfourInformationPage(x):!isAsfourInformationPage(x)))&&
  (SRC==='all'||x.source===SRC)&&
@@ -165,36 +167,43 @@ function renderDiscover(){
     <option value="information" ${ASFOUR_REFERENCE_FILTER==='information'?'selected':''}>Catalog information (${informationCount})</option>
     <option value="all" ${ASFOUR_REFERENCE_FILTER==='all'?'selected':''}>All references</option>
   </select>`:'';
+ const tlFilter=ACTIVE_BRAND_ID==='tl'? `<select id="tlCatalogView" aria-label="Tong Luo catalog view">
+   <option value="products" ${TL_CATALOG_VIEW==='products'?'selected':''}>Individual products</option>
+   <option value="pages" ${TL_CATALOG_VIEW==='pages'?'selected':''}>Original catalog pages</option>
+ </select>`:'';
  const note=ACTIVE_BRAND_ID==='asfour'?
    `${informationCount} confirmed editorial pages separated; all original records and selections are preserved.`:
-   ACTIVE_BRAND_ID==='tl'?'Tong Luo · Model codes from the searchable PDF can now be searched. Pick one chandelier, verify its printed code, and crop its photo.':
+   ACTIVE_BRAND_ID==='tl'?(TL_CATALOG_VIEW==='products'
+    ?'Individual models with automatic product photos. OCR codes and dimensions require supplier verification; photo matches marked for review.'
+    :'Original PDF-page photos retained for checking model references; select individual products from the other view.'):
    'Scanned catalogs may contain visual references needing supplier verification';
  const items=filteredCatalogItems(),visible=items.slice(0,LIMIT);
  $('app').innerHTML=`${pricePhotoNotice()}<div class="toolbar"><div class="search">
    <input id="catalogSearch" placeholder="Search product code, style or size…" value="${q(SEARCH)}"></div>
    <select id="srcFilter">${sourceOptions}</select>
    <select id="kindFilter"><option value="all">All records</option><option value="coded" ${KIND==='coded'?'selected':''}>Exact product codes</option><option value="pages" ${KIND==='pages'?'selected':''}>Visual catalog pages</option></select>
-   ${extraFilter}</div>
-   <div class="subheading"><h2>${items.length.toLocaleString()} catalog references</h2><span class="tiny">${q(note)}</span></div>
+   ${extraFilter}${tlFilter}</div>
+   <div class="subheading"><h2>${items.length.toLocaleString()} ${ACTIVE_BRAND_ID==='tl'?(TL_CATALOG_VIEW==='products'?'individual product models':'original catalog pages'):'catalog references'}</h2><span class="tiny">${q(note)}</span></div>
    <div class="cards">${visible.map(i=>catalogCard(i)).join('')}</div>
    ${items.length>LIMIT?`<div class="catalog-more" style="text-align:center;margin:22px"><button class="btn secondary" data-action="more">Load more (${Math.min(48,items.length-LIMIT)})</button></div>`:''}`;
 }
 function catalogCard(i){
  const added=!!S.catalog[i.id],sel=S.shortlist.includes(i.id);
- const tlPage=ACTIVE_BRAND_ID==='tl'&&i.source==='tl-chandelier'&&!i.splitGenerated;
+ const tlPage=ACTIVE_BRAND_ID==='tl'&&!!i.tlPageReference;
  const editorial=isAsfourInformationPage(i);
- const label=tlPage?'Choose a model':editorial?'Catalog information':i.photoKind==='supplier-photo'?'Product photo':i.photoKind==='catalog-crop'?'Individual design':i.code?'Product · PDF preview':'Catalog page';
+ const label=tlPage?'Original page':i.tlIndividualModel?(i.photoNeedsVerification?'Verify photo':'Individual product'):editorial?'Catalog information':i.photoKind==='supplier-photo'?'Product photo':i.photoKind==='catalog-crop'?'Individual design':i.code?'Product · PDF preview':'Catalog page';
  const count=tlPage&&Array.isArray(i.modelCandidates)?i.modelCandidates.length:0;
- const description=tlPage?(count?count+' model labels found in searchable PDF · pick one chandelier':'Multi-design catalog page · code needs verification'):editorial?'Editorial/reference page — not a coded product':(i.code?(i.name||'Chandelier'):'Visual reference only');
+ const description=tlPage?(count?count+' model labels on original page':'Source catalog page for product verification'):i.tlIndividualModel?'Supplier model from searchable PDF · verify code before ordering':editorial?'Editorial/reference page — not a coded product':(i.code?(i.name||'Chandelier'):'Visual reference only');
  return `<article class="card"><div class="card-photo">${sprite(i.sprite)}<span class="float-tag">${q(label)}</span></div>
  <div class="card-info"><div class="card-name">${q(i.code||i.name)}</div>
  <div class="card-meta">${q(description)}</div>
  ${tlPage&&i.modelCandidates?.length?`<div class="card-meta" title="OCR text — verify against photo">${q(i.modelCandidates.slice(0,3).map(m=>m.code).join(' · '))}${i.modelCandidates.length>3?' · …':''}</div>`:''}
+ ${i.tlIndividualModel&&(i.photoNeedsVerification||i.modelNeedsVerification)?`<div class="card-meta" style="color:#9a6027">Verify ${i.photoNeedsVerification?'photo':'model code'}${i.photoNeedsVerification&&i.modelNeedsVerification?' and model code':''} against original page</div>`:''}
  ${String(i.dimension||'').trim()?`<div class="card-size" title="Original catalog size"><span class="card-size-label">Size</span> ${q(i.dimension)}</div>`:''}
  <div class="card-meta">${q(PACK.sources[i.source]?.name||'Supplier catalog')} · p.${i.page}</div>
  ${i.photoKind==='supplier-photo'&&i.imageSharedWithVariants?'<div class="card-meta">Reference photo; finish may vary</div>':''}</div>
- <div class="card-foot"><button class="btn quiet small" data-action="item" data-id="${q(i.id)}">${tlPage?'View page':'View details'}</button>
- <button class="btn small ${added||sel?'secondary':''}" data-action="${tlPage?'tlPick':'shortlist'}" data-id="${q(i.id)}">${tlPage?'Pick product':added||sel?'✓ Selected':'＋ Select'}</button></div></article>`;
+ <div class="card-foot"><button class="btn quiet small" data-action="item" data-id="${q(i.id)}">${tlPage?'View original':'View details'}</button>
+ ${tlPage?'':`<button class="btn small ${added||sel?'secondary':''}" data-action="shortlist" data-id="${q(i.id)}">${added||sel?'✓ Selected':'＋ Select'}</button>`}</div></article>`;
 }
 function renderFamilies(){const ql=SEARCH.toLowerCase();const list=PACK.family.filter(f=>!ql||[f.id,f.name,f.mainCode].join(' ').toLowerCase().includes(ql));$('app').innerHTML=`<div class="toolbar"><div class="search"><input id="familySearch" placeholder="Search preferred family…" value="${q(SEARCH)}"></div>${ACTIVE_BRAND_ID==='asfour'?'<button class="btn secondary" data-action="openDrive">Open original selection file</button>':''}${['Super Admin','Admin'].includes(window.LITeamSync?.getRoles?.()?.role)?
    '<details class="li-export-choice"><summary class="btn secondary">⬇ Export Excel ▾</summary><div class="li-export-menu">'+
