@@ -144,8 +144,10 @@
    if(!signedIn()||!record||record.brandId===ACTIVE_BRAND_ID)return null;
    const lib=teamPhotoPacks.get(String(record.brandId));
    if(!lib||lib.version!==known(record.brandId)?.version)return null;
-   const item=findTeamPhotoItem(lib.items,record),sprite=item?.sprite;
-   if(!sprite)return null;
+   const item=findTeamPhotoItem(lib.items,record),base=item?.sprite;
+   if(!base)return null;
+   const picked=window.LITLPicker?.parseRef(record.item?.sourceRef);
+   const sprite=picked&&picked.parentId===item.id?{...base,cropRect:picked.crop}:base;
    if(sprite.data){
      if(/^data:image\/(webp|png|jpeg);base64,/.test(sprite.data))
        return {sprite,urls:lib.urls};
