@@ -1,5 +1,5 @@
-/* L'Imperial Product Selection: private cross-device Google Sheets team sync.
-   Tokens live only in memory. The Apps Script backend verifies them and roles. */
+/* L'Imperial Product Selection: Supabase staff authentication and private team sync.
+   The Apps Script bridge verifies Supabase access tokens and preserves Google Sheet records. */
 'use strict';
 (() => {
  const KEY='li-team-sync-client-config-v1';const SESSION_KEY='li-team-browser-session-v1';const APP_ORIGIN=location.origin;
@@ -15,12 +15,14 @@
  function self(){return {email,role,name:displayName}}
  function hasRole(){return ['Super Admin','Admin','Manager'].includes(role)}
  function normalizeConfigValue(value){return String(value??'').replace(/[\s\u200B-\u200D\uFEFF]+/g,'')}
- function settingsValid(){return /^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(normalizeConfigValue(config.clientId))&&/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(normalizeConfigValue(config.scriptUrl))}
+ function settingsValid(){return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(normalizeConfigValue(config.scriptUrl))}
  function clearRememberedSession(){try{sessionStorage.removeItem(SESSION_KEY)}catch(_){}}
- function tokenExpiresAt(t){try{const p=JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));return p.aud===config.clientId&&Number.isFinite(Number(p.exp))?Number(p.exp)*1000:0}catch(_){return 0}}
- function rememberVerifiedSession(){const expiry=tokenExpiresAt(token);if(!email||!role||expiry<=Date.now()+60000)return;try{sessionStorage.setItem(SESSION_KEY,JSON.stringify({token,expires:expiry,clientId:config.clientId}))}catch(_){}}
- function restoreRememberedSession(){try{const saved=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');if(!saved||saved.clientId!==config.clientId||saved.expires<=Date.now()+60000||saved.expires!==tokenExpiresAt(saved.token)){clearRememberedSession();return false}token=saved.token;status='connecting';return true}catch(_){clearRememberedSession();return false}}
- function invalidIdentity(err){return /SIGN_IN_EXPIRED|SIGN_IN_REQUIRED|INVALID_GOOGLE_IDENTITY|ACCESS_DENIED|invalid token|expired token/i.test(String(err?.message||''))}
+ function tokenExpiresAt(t){try{const p=JSON.parse(atob(String(t).split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));return Number.isFinite(Number(p.exp))?Number(p.exp)*1000:0}catch(_){return 0}}
+ // Supabase SDK persists and refreshes the access token in sessionStorage.
+ // Never restore a legacy Google credential into a Supabase session.
+ function rememberVerifiedSession(){clearRememberedSession()}
+ function restoreRememberedSession(){clearRememberedSession();return false}
+ function invalidIdentity(err){return /SUPABASE_ACCESS_DENIED|INVALID_SUPABASE_TOKEN|ACCESS_DENIED|SIGN_IN_REQUIRED/i.test(String(err?.message||''))}
  function scheduleRetry(){if(!token||reconnectTimer||reconnectAttempts>=3)return;const delay=[3000,7500,16000][reconnectAttempts++];reconnectTimer=setTimeout(()=>{reconnectTimer=null;authenticateCurrentToken()},delay)}
  async function authenticateCurrentToken(){
   if(!token||credentialInFlight)return;
@@ -37,9 +39,9 @@
    if(invalidIdentity(err)){
     window.LICentralCatalog?.onSignedOut();
     clearRememberedSession();token='';email='';role='';displayName='';
-    status='auth-required';lastError='Google sign-in needs renewal or this account is not authorized: '+err.message;
+    status='auth-required';lastError='Supabase sign-in needs renewal or this account is not authorized: '+err.message;
    }else{
-    status='offline';lastError='Google recognized your account, but Team Sync could not connect: '+err.message+'. You can retry without signing in again.';
+    status='offline';lastError=/SIGN_IN_EXPIRED|INVALID_GOOGLE_IDENTITY/.test(String(err?.message||''))?'Team server still requires Google tokens. Deploy the Supabase auth replacement in Apps Script; selections remain safe.':'Supabase verified your account, but Team Sync could not connect: '+err.message+'. Retry after the server is updated.';
     scheduleRetry();
    }
    paint();
@@ -71,39 +73,32 @@
   }
   // Never expose navigation, downloads, or cached catalogs without a freshly
   // server-authorized email and role. A restored token is verified first.
-  const mode=!settingsValid()?'config':token?'verifying':'signin';
+  const mode=token?'verifying':'signin';
   if(content.dataset.liGateMode!==mode){
    content.dataset.liGateMode=mode;
-   if(mode==='config'){
-    content.innerHTML='<p class="li-auth-error">This device needs the approved Product Selection connection settings.</p>'+
-      '<form id="liSyncConfigForm"><div class="field"><label>Apps Script Web App /exec URL</label><input type="url" name="scriptUrl" required placeholder="https://script.google.com/macros/s/…/exec"></div>'+
-      '<div class="field" style="margin-top:12px"><label>Google Web OAuth Client ID</label><input name="clientId" required placeholder="…apps.googleusercontent.com"></div>'+
-      '<div class="li-auth-actions"><button type="submit" class="btn">Save connection settings</button></div></form>';
-   }else{
-    content.innerHTML='<p id="liGateAuthStatus" class="li-auth-status" role="status"></p>'+
-      '<div id="liGateError" class="li-auth-error" role="alert" hidden></div>'+
-      '<div id="liGateGoogleSignIn"></div>'+
-      '<div class="li-auth-actions"><button type="button" class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button>'+
-      '<button type="button" class="btn secondary small" data-sync-action="retryConnection">Retry connection</button>'+
-      '<button type="button" class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button>'+
-      '<button type="button" class="btn quiet small" data-sync-action="signout">Change Google account</button></div>';
-   }
+   content.innerHTML='<h2 style="font-size:22px;margin:0 0 10px">L\'Imperial Staff Login</h2>'+
+    '<p id="liGateAuthStatus" class="li-auth-status" role="status"></p>'+
+    '<div id="liGateError" class="li-auth-error" role="alert" hidden></div>'+
+    '<form id="liSupabaseSignIn"><div class="field"><label>Staff email</label>'+
+    '<input name="email" type="email" autocomplete="username" required placeholder="name@example.com"></div>'+
+    '<div class="field" style="margin-top:12px"><label>Password</label>'+
+    '<input name="password" type="password" autocomplete="current-password" required></div>'+
+    '<div class="li-auth-actions"><button type="submit" class="btn">Sign in with Supabase</button></div></form>'+
+    '<div class="li-auth-actions"><button type="button" class="btn secondary small" data-sync-action="retryConnection">Retry secure connection</button>'+
+    '<button type="button" class="btn quiet small" data-sync-action="signout">Change account</button></div>';
   }
   const stat=document.getElementById('liGateAuthStatus');
   if(stat)stat.textContent=token?
-   'Google account received. Verifying email and assigned role with L\'Imperial Team Sync…':
-   'Use the Google account approved by your Super Admin.';
+   'Supabase account verified. Checking the private Team Sync server…':
+   'Use the email and password for your approved Supabase staff account.';
   const error=document.getElementById('liGateError');
-  if(error){error.textContent=lastError||'';error.hidden=!lastError;}
+  if(error){error.textContent=lastError||'';error.hidden=!lastError}
   const retry=document.querySelector('#liAuthGate [data-sync-action="retryConnection"]');
   if(retry)retry.hidden=!token;
   const change=document.querySelector('#liAuthGate [data-sync-action="signout"]');
   if(change)change.hidden=!token;
-  const signin=document.querySelector('#liAuthGate [data-sync-action="retrySignIn"]');
-  if(signin)signin.hidden=!!token;
-  const slot=document.getElementById('liGateGoogleSignIn');
-  if(slot)slot.hidden=!!token;
-  if(!token)showGoogleButton();
+  const form=document.getElementById('liSupabaseSignIn');
+  if(form)form.hidden=!!token;
  }
  function info(text){const n=document.getElementById('teamSyncNotice');if(n)n.textContent=text}
  function paint(){syncAccessGate();if(typeof VIEW!=='undefined'&&VIEW==='team'&&statusView().connected)render()}
