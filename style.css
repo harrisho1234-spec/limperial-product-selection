@@ -316,3 +316,11 @@ body.li-auth-unlocked .li-auth-gate{display:none}
 .tl-pick-preview>.catalog-crop-window{width:min(100%,calc(270px * var(--li-crop-aspect,1)));height:auto;max-height:100%;aspect-ratio:var(--li-crop-aspect,1);flex:0 0 auto}
 .tl-pick-preview>.sprite{width:100%;height:100%;background-size:400% 400%;background-repeat:no-repeat}
 @media(max-width:850px){.tl-picker-grid{grid-template-columns:1fr}.tl-pick-canvas{width:min(100%,480px)}.tl-pick-preview{height:210px}.tl-pick-preview>.catalog-crop-window{width:min(100%,calc(210px * var(--li-crop-aspect,1)))}}
+
+/* Supabase staging sign-in and existing-location Admin cost export. */
+.li-auth-form{display:grid;gap:12px;margin:18px 0}
+.li-auth-form .field{display:grid;gap:5px}
+.li-auth-form input{padding:11px 12px;border:1px solid #d9d4c9;border-radius:8px;min-width:0}
+.li-auth-form button[type=submit]{justify-self:start}
+.li-cost-export-menu{display:inline-flex;gap:7px;align-items:center;flex-wrap:wrap}
+@media(max-width:700px){.li-cost-export-menu{width:100%}.li-cost-export-menu .btn{flex:1}}
