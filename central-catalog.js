@@ -14,7 +14,7 @@
  function banner(id){
    const meta=known(id),task=progress.get(id),error=errors.get(id);
    if(!meta)return errors.get(id)?'<div class="alert">'+q(errors.get(id))+'</div>':'';
-   if(!signedIn())return '<div class="alert">This supplier catalog is centrally managed. <button class="btn secondary small" data-action="goto" data-to="team">Sign in with Google</button> to view its products. Authorized staff do not need to import any files.</div>';
+   if(!signedIn())return '<div class="alert">This supplier catalog is centrally managed. <button class="btn secondary small" data-action="goto" data-to="team">Sign in with Supabase</button> to view its products. Authorized staff do not need to import any files.</div>';
    if(error)return '<div class="alert">Catalog download was unsuccessful: '+q(error)+' <button class="btn secondary small" data-action="loadCentralCatalog" data-id="'+q(id)+'">Retry</button>. The local selections are preserved.</div>';
    if(task)return '<div class="alert">Loading '+q(brandNow().name)+' catalog securely from Google Drive: '+task.done+' / '+task.total+' photo sheets received. Please keep this app open.</div>';
    return '<div class="alert">Private supplier catalog managed by L\'Imperial. <button class="btn quiet small" data-action="loadCentralCatalog" data-id="'+q(id)+'">Check for catalog updates</button></div>';
@@ -37,7 +37,7 @@
    return loaded;
  }
  async function fetchBrand(brandId,force){
-   if(!signedIn())throw Error('Google sign-in required');const role=window.LITeamSync?.getRoles()?.role;if(role!=='Super Admin'&&!known(brandId)?.version?.endsWith('-price-safe-v1'))throw Error('Price-safe catalog protection is pending deployment. Ask Super Admin to deploy the updated Apps Script; original price sheets cannot be shown to this role.');
+   if(!signedIn())throw Error('Supabase staff sign-in required');const role=window.LITeamSync?.getRoles()?.role;if(role!=='Super Admin'&&!known(brandId)?.version?.endsWith('-price-safe-v1'))throw Error('Price-safe catalog protection is pending deployment. Ask Super Admin to deploy the updated Apps Script; original price sheets cannot be shown to this role.');
    const item=known(brandId);if(!item)throw Error('No published catalog for this supplier');
    const existing=DB?await tx(brandKey(brandId),null,'readonly'):null;
    if(!force && existing?.metadata?.centralVersion===item.version){readyPack(brandId,existing);return {cached:true,count:existing.catalog.items.length}}
