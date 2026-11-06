@@ -9,9 +9,29 @@
  const MEMBERS='product_selection_members';
  const COSTS='product_selection_supplier_costs';
  const ADMIN_ROLES=['Admin','Super Admin'];
- const client=window.supabase?.createClient?.(PROJECT_URL,PUBLISHABLE_KEY,{
-  auth:{persistSession:true,autoRefreshToken:true,detectSessionInUrl:false}
- })||null;
+ // Load Supabase only when Admin opens cost access; never delay normal Staff login.
+ const COST_AUTH_STORAGE='li-product-selection-cost-session';
+ let client=null,sdkLoading=null;
+ async function ensureClient(){
+  if(client)return client;
+  if(!sdkLoading)sdkLoading=new Promise((resolve,reject)=>{
+   if(window.supabase?.createClient){resolve(window.supabase);return}
+   const script=document.createElement('script');
+   script.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.57.0/dist/umd/supabase.js';
+   script.async=true;
+   script.onload=()=>window.supabase?.createClient?resolve(window.supabase):reject(new Error('Supabase library unavailable.'));
+   script.onerror=()=>reject(new Error('Could not load secure Supabase sign-in. Check the internet connection.'));
+   document.head.appendChild(script);
+  }).catch(error=>{sdkLoading=null;throw error});
+  const sdk=await sdkLoading;
+  let storage=null;
+  try{storage=window.sessionStorage}catch(_){}
+  client=sdk.createClient(PROJECT_URL,PUBLISHABLE_KEY,{
+   auth:{persistSession:!!storage,storage:storage||undefined,storageKey:COST_AUTH_STORAGE,
+    autoRefreshToken:true,detectSessionInUrl:false}
+  });
+  return client;
+ }
  let visible=false,known=new Map(),lastIdentity=null,loginOpen=false;
 
  function googleRole(){return window.LITeamSync?.getRoles?.()||{}}
@@ -41,8 +61,8 @@
   return 'sha256:'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
  }
  async function identity(){
-  if(!client)throw Error('Secure Supabase login library did not load. Reopen the app and try again.');
-  const {data:{user}={},error}=await client.auth.getUser();
+  const api=await ensureClient();
+  const {data:{user}={},error}=await api.auth.getUser();
   if(error)throw Error('Supabase session expired. Please sign in again.');
   if(!user)return null;
   const {data:member,error:memberError}=await client.from(MEMBERS)
@@ -149,7 +169,11 @@
   if(error)throw Error('Supabase rejected this cost update.');
   if(visible){const fresh=await lookup([record]);known.set(String(record.recordId||record.id),fresh[0]);reread?.()}
  }
- async function signOut(){visible=false;known.clear();lastIdentity=null;hideLogin();if(client)await client.auth.signOut().catch(()=>{})}
+ async function signOut(){
+  visible=false;known.clear();lastIdentity=null;hideLogin();
+  try{window.sessionStorage?.removeItem(COST_AUTH_STORAGE)}catch(_){}
+  if(client)await client.auth.signOut().catch(()=>{});
+ }
  document.addEventListener('click',e=>{
   if(e.target.closest('[data-cost-action="cancel"]'))hideLogin();
  });
@@ -159,7 +183,7 @@
   const form=e.target,btn=form.querySelector('button[type=submit]'),err=document.getElementById('liCostLoginError');
   btn.disabled=true;err.hidden=true;
   try{
-   if(!client)throw Error('Supabase library unavailable.');
+   await ensureClient();
    const data=new FormData(form),email=String(data.get('email')||'').trim(),password=String(data.get('password')||'');
    if(email.toLowerCase()!==String(googleRole().email||'').toLowerCase())throw Error('Use the same email shown in Product Selection.');
    const {error}=await client.auth.signInWithPassword({email,password});
