@@ -244,8 +244,12 @@ async function onCredential(credential){if(!credential?.credential)return;token=
  }
  function teamImageForRecord(record){
    const item=productFromLocal(record);
-   if(item?.sprite&&(item.sprite.data||(item.sprite.atlas&&SPRITES[item.sprite.atlas])))
-     return {sprite:item.sprite,urls:SPRITES};
+   if(item?.sprite&&(item.sprite.data||(item.sprite.atlas&&SPRITES[item.sprite.atlas]))){
+     const picked=window.LITLPicker?.parseRef(record.item?.sourceRef);
+     const matches=picked&&(picked.parentId===item.id||picked.parentId===item.sourceItemId);
+     const sprite=matches?{...item.sprite,cropRect:picked.crop}:item.sprite;
+     return {sprite,urls:SPRITES};
+   }
    return window.LICentralCatalog?.teamPhotoFor?.(record)||null;
  }
  function preloadVisibleTeamPhotos(visible){
