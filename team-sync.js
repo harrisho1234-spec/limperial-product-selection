@@ -3,7 +3,7 @@
 'use strict';
 (() => {
  const KEY='li-team-sync-client-config-v1';const SESSION_KEY='li-team-browser-session-v1';const APP_ORIGIN=location.origin;
- const DEFAULT_CONFIG={scriptUrl:'https://script.google.com/macros/s/AKfycbzlXPtmjhHpTot4R0ItabhBOQBrNamB2TUegdq6Lde-uX930U1hIohNqRsvUzMW5LYc1g/exec',clientId:'97172665640-k7lq4tqtl8jl3udei8f4f7tml8agfil4.apps.googleusercontent.com'};let config={...DEFAULT_CONFIG};try{config={...DEFAULT_CONFIG,...JSON.parse(localStorage.getItem(KEY)||'{}')}}catch(_){config={...DEFAULT_CONFIG}}
+ const DEFAULT_CONFIG={scriptUrl:'https://script.google.com/macros/s/AKfycbzlXPtmjhHpTot4R0ItabhBOQBrNamB2TUegdq6Lde-uX930U1hIohNqRsvUzMW5LYc1g/exec',clientId:'97172665640-k7lq4tqtl8jl3udei8f4f7tml8agfil4.apps.googleusercontent.com'};let config={...DEFAULT_CONFIG}; // Fixed trusted backend: never send a Supabase bearer token to a browser-configured URL.
  let iframe=null,bridgePopup=null,bridgePeer=null,bridgeOrigin='',bridgeNonce='',bridgeMode='iframe',signInStarted=false,ready=false,token='',email='',role='',displayName='';
  let records=[],brands=[],users=[],lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
  let editingUserEmail='',userManageBusy=false,userManageNotice='',userManageIsError=false;
@@ -15,7 +15,7 @@
  function self(){return {email,role,name:displayName}}
  function hasRole(){return ['Super Admin','Admin','Manager'].includes(role)}
  function normalizeConfigValue(value){return String(value??'').replace(/[\s\u200B-\u200D\uFEFF]+/g,'')}
- function settingsValid(){return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(normalizeConfigValue(config.scriptUrl))}
+ function settingsValid(){return normalizeConfigValue(config.scriptUrl)===DEFAULT_CONFIG.scriptUrl}
  function clearRememberedSession(){try{sessionStorage.removeItem(SESSION_KEY)}catch(_){}}
  function tokenExpiresAt(t){try{const p=JSON.parse(atob(String(t).split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));return Number.isFinite(Number(p.exp))?Number(p.exp)*1000:0}catch(_){return 0}}
  // Supabase SDK persists and refreshes the access token in sessionStorage.
@@ -102,7 +102,7 @@
  }
  function info(text){const n=document.getElementById('teamSyncNotice');if(n)n.textContent=text}
  function paint(){syncAccessGate();if(typeof VIEW!=='undefined'&&VIEW==='team'&&statusView().connected)render()}
- function saveConfig(next){const clientId=normalizeConfigValue(next.clientId),scriptUrl=normalizeConfigValue(next.scriptUrl);if(!/^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(clientId))throw Error('Enter the Web OAuth Client ID from Google Cloud');if(!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(scriptUrl))throw Error('Enter the deployed Apps Script Web App /exec URL');config={clientId,scriptUrl};localStorage.setItem(KEY,JSON.stringify(config));status='configured';lastError='';disconnect(false);paint();return true}
+ function saveConfig(){throw Error('The private Team Sync endpoint is centrally managed. Update the approved GitHub configuration after deploying Apps Script; never enter an arbitrary URL here.')}
  function repairClientMarkup(){
   const projectUrl='https://console.cloud.google.com/auth/clients?project=limperialproductselection-sync';
   return '<div class="row-actions" style="margin-top:10px"><button type="button" class="btn quiet small" data-sync-action="fixClient">'+(fixClientOpen?'Hide OAuth diagnostics':'Fix Google Sign-In (401 invalid_client)')+'</button></div>'+
