@@ -302,3 +302,17 @@ body.li-auth-unlocked .li-auth-gate{display:none}
  .team-duplicate-body{padding:7px}
  .team-dup-table th,.team-dup-table td{padding:7px 9px;min-width:110px}
 }
+
+/* TL individual chandelier picker: crop one model from a multi-product scan. */
+.tl-picker-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start}
+.tl-picker-grid>div{min-width:0}
+.tl-picker-label{color:#1e3851;font-weight:700;font-size:12px;margin-bottom:9px}
+.tl-pick-canvas{position:relative;aspect-ratio:1/1;width:min(100%,420px);background:#edeae5;overflow:hidden;border:1px solid #c7bca9;border-radius:9px;touch-action:none;cursor:crosshair;user-select:none}
+.tl-pick-canvas>.sprite{position:absolute;inset:0;width:100%;height:100%;background-size:400% 400%;background-repeat:no-repeat;pointer-events:none}
+.tl-pick-box{position:absolute;pointer-events:none;border:3px solid #b88738;background:rgba(225,174,85,.11);box-shadow:0 0 0 999px rgba(0,0,0,.22),inset 0 0 0 1px rgba(255,255,255,.9);border-radius:3px}
+.tl-picker-presets{display:flex;gap:5px;flex-wrap:wrap;margin-top:10px}
+.tl-picker-presets .btn{font-size:10px;padding:7px 9px}
+.tl-pick-preview{height:270px;width:100%;display:flex;justify-content:center;align-items:center;background:#f1efeb;border:1px solid #e0ddd6;border-radius:9px;overflow:hidden;margin-bottom:12px}
+.tl-pick-preview>.catalog-crop-window{width:min(100%,calc(270px * var(--li-crop-aspect,1)));height:auto;max-height:100%;aspect-ratio:var(--li-crop-aspect,1);flex:0 0 auto}
+.tl-pick-preview>.sprite{width:100%;height:100%;background-size:400% 400%;background-repeat:no-repeat}
+@media(max-width:850px){.tl-picker-grid{grid-template-columns:1fr}.tl-pick-canvas{width:min(100%,480px)}.tl-pick-preview{height:210px}.tl-pick-preview>.catalog-crop-window{width:min(100%,calc(210px * var(--li-crop-aspect,1)))}}
