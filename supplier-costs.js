@@ -59,6 +59,7 @@ window.LISelectionCosts=(()=>{
  }
  async function save(item,amount,currency='USD'){
   ensureAuthorized();
+  if(String(amount??'').trim()==='')throw Error('Unit cost cannot be blank.');
   const price=Number(amount);
   if(!Number.isFinite(price)||price<0)throw Error('Enter a valid non-negative supplier cost.');
   const c=String(currency||'USD').toUpperCase();
