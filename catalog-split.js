@@ -59,6 +59,14 @@
     return apply(pack,brand)
   }
   function image(s){
+    // Free-form crop of one specific model on TL's scanned catalog page.
+    // Convert to the same atlas crop geometry consumed by card previews and Excel.
+    if(Array.isArray(s?.cropRect)&&s.cropRect.length===4){
+      const [x,y,w,h]=s.cropRect.map(Number);
+      if([x,y,w,h].every(Number.isFinite)&&w>=0.06&&h>=0.06&&x>=0&&y>=0&&x+w<=1.001&&y+h<=1.001)
+        return {rows:1/h,cols:1/w,row:y/h,col:x/w};
+      return null;
+    }
     if(!s?.crop)return null;
     const {rows,cols,row,col}=s.crop;
     if(![rows,cols,row,col].every(Number.isInteger)||rows<1||cols<1||row<0||row>=rows||col<0||col>=cols||rows*cols>9)return null;
