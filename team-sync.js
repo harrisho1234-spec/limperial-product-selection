@@ -84,7 +84,7 @@
     '<div class="field" style="margin-top:12px"><label>Password</label>'+
     '<input name="password" type="password" autocomplete="current-password" required></div>'+
     '<div class="li-auth-actions"><button type="submit" class="btn">Sign in with Supabase</button></div></form>'+
-    '<div class="li-auth-actions"><button type="button" class="btn secondary small" data-sync-action="retryConnection">Retry secure connection</button>'+
+    '<div class="li-auth-actions"><button type="button" class="btn secondary small" data-sync-action="retryConnection">Retry secure connection</button><button type="button" class="btn quiet small" data-sync-action="openBridgePopup">Open connection window</button>'+
     '<button type="button" class="btn quiet small" data-sync-action="signout">Change account</button></div>';
   }
   const stat=document.getElementById('liGateAuthStatus');
@@ -111,7 +111,7 @@
  function newNonce(){const bytes=new Uint8Array(24);crypto.getRandomValues(bytes);return Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('')}
  function bridgeURL(){const url=new URL(config.scriptUrl);url.searchParams.set('li_session',bridgeNonce);return url.toString()}
  function frame(){if(!settingsValid())throw Error('Configure Apps Script URL and OAuth Client ID first');if(iframe||(bridgePopup&&!bridgePopup.closed))return;
-  bridgeMode='iframe';bridgeNonce=newNonce();iframe=document.createElement('iframe');iframe.setAttribute('aria-hidden','true');iframe.setAttribute('title','Secure LImperial Google Sync');iframe.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;left:-10000px;';iframe.referrerPolicy='no-referrer';iframe.src=bridgeURL();document.body.appendChild(iframe)}
+  bridgeMode='iframe';bridgeNonce=newNonce();iframe=document.createElement('iframe');iframe.setAttribute('aria-hidden','true');iframe.setAttribute('title','Secure LImperial Team Sync');iframe.style.cssText='position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;left:-10000px;';iframe.referrerPolicy='no-referrer';iframe.src=bridgeURL();document.body.appendChild(iframe)}
  function openBridgePopup(){if(!settingsValid())return;ready=false;bridgePeer=null;bridgeOrigin='';bridgeMode='popup';bridgeNonce=newNonce();if(iframe){iframe.remove();iframe=null}
   const windowRef=window.open(bridgeURL(),'liProductSelectionSync','popup=yes,width=570,height=490');
   if(!windowRef){lastError='Chrome blocked the secure connection window. Allow pop-ups for this app and try again.';status='error';paint();return}
@@ -123,7 +123,7 @@
  async function ensureReady(){if(!ready&&bridgeMode==='iframe'&&iframe&&iframe.dataset.liBridgeFailed==='yes'){iframe.remove();iframe=null;bridgePeer=null;bridgeOrigin='';bridgeNonce=''}frame();if(bridgeMode==='popup'&&bridgePopup?.closed)throw Error('Secure connection window was closed. Reopen it in Team selections.');
   if(ready)return;const start=Date.now();while(!ready&&Date.now()-start<18000){if(bridgeMode==='popup'&&bridgePopup?.closed)break;await new Promise(r=>setTimeout(r,180))}
   if(!ready){if(bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';throw Error(bridgeMode==='popup'?'Secure Google connection window did not respond. Check if it shows a Google permission or browser error.':'Google Apps Script could not connect inside Chrome. Use Open secure connection window below. If that also fails, check the active Code.gs / Bridge.html deployment.')} }
- async function call(op,payload={}){if(!token)throw Error('Sign in with Google first');await ensureReady();const id='req_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
+ async function call(op,payload={}){if(!token)throw Error('Sign in with Supabase first');await ensureReady();const id='req_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
   return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{reqs.delete(id);reject(Error('Team server did not respond'))},32000);
    reqs.set(id,{timer,resolve:result=>{if(result?.ok)resolve(result.data);else reject(Error(result?.error||'Team sync request failed'))}});
    bridgePeer.postMessage({kind:'LI_SYNC_REQUEST',liNonce:bridgeNonce,id,token,op,payload},bridgeOrigin);
