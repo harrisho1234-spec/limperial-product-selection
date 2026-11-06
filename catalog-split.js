@@ -38,11 +38,14 @@
   }
   function apply(pack,brand){
     if(!pack?.catalog||!Array.isArray(pack.catalog.items))return {pages:0,designs:0};
-    const originals=pack.catalog.items.filter(item=>!item.splitGenerated);
+    // Individually indexed TL model cards are permanent catalog entries,
+    // not transient split-page derivatives; preserve them on every sync.
+    const originals=pack.catalog.items.filter(item=>!item.splitGenerated||item.tlIndividualModel);
     const manual=overrides(brand);const result=[];let pages=0,designs=0;
     for(const item of originals){
+      if(item.tlIndividualModel){result.push({...item,splitParent:false});continue}
       const layout=layoutFor(item,brand,manual),l=LAYOUTS[layout];
-      if(!l){result.push({...item,splitParent:false});continue}
+      if(!l){result.push({...item,splitParent:!!item.tlPageReference});continue}
       const total=l.rows*l.cols;pages++;designs+=total;
       result.push({...item,splitParent:true,splitLayout:layout});
       for(let n=0;n<total;n++)result.push(part(item,n,total,layout))
@@ -53,7 +56,7 @@
   function setLayout(pack,brand,id,layout){
     if(layout!=='none'&&!LAYOUTS[layout])throw Error('Unsupported page layout');
     const original=pack?.catalog?.items?.find(item=>item.id===id&&!item.splitGenerated);
-    if(!original||original.code)throw Error('Only image-only catalog pages can be split');
+    if(!original||original.code||original.tlPageReference)throw Error('Only editable image-only pages can be split');
     const value=overrides(brand);value[id]=layout;
     localStorage.setItem(key(brand),JSON.stringify(value));
     return apply(pack,brand)
