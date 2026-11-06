@@ -412,11 +412,19 @@ async function onCredential(credential){if(!credential?.credential)return;token=
     };
   });
 }
-function exportTeamCsv(items){
+function exportTeamCsv(items,withCost=false,costs=[]){
   // Match the supplied nine-column Team Selections workbook.
   // CSV cannot embed photos; the Product photo cells remain empty.
   const headers=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request'];
-  const data=items.map(r=>[r.number,'',r.code,r.description,r.original,r.requested,r.qty,r.finish,r.request]);
+  if(withCost)headers.push('Unit Cost','Total Cost');
+  const data=items.map((r,i)=>{
+   const row=[r.number,'',r.code,r.description,r.original,r.requested,r.qty,r.finish,r.request];
+   if(withCost){
+     const cost=costs[i],unit=cost?Number(cost.unit_cost):null,qty=Number(r.qty);
+     row.push(cost&&Number.isFinite(unit)?unit:'',cost&&Number.isFinite(unit)&&Number.isFinite(qty)?Number((unit*qty).toFixed(4)):'');
+   }
+   return row;
+  });
   const safe=v=>{
     let value=String(v??'');
     if(/^\s*[=+\-@]/.test(value))value="'"+value;
@@ -425,22 +433,30 @@ function exportTeamCsv(items){
   const csv=[headers,...data].map(row=>row.map(safe).join(',')).join('\r\n');
   const blob=new Blob(['\uFEFF',csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob),link=document.createElement('a');
-  link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+'_'+new Date().toISOString().slice(0,10)+'.csv';
+  link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.csv';
   document.body.appendChild(link);link.click();link.remove();
   setTimeout(()=>URL.revokeObjectURL(url),15000);
 }
 let exportingTeamExcel=false;
-async function exportTeamExcel(){
-  if(!token||!email||!role)return alert('Sign in with Google to export authorized team selections.');
+async function exportTeamExcel(withCost=false){
+  if(!token||!email||!role)return alert('Sign in to export authorized team selections.');
   if(exportingTeamExcel)return;
   const items=exportTeamRows();
   if(!items.length)return alert('No team selections match this brand filter.');
+  if(withCost&&!['Super Admin','Admin'].includes(role))return alert('Only Admin and Super Admin may export supplier costs.');
+  if(withCost){
+    if(!window.LISelectionCosts||!(await window.LISelectionCosts.requireAdmin()))return;
+  }
   exportingTeamExcel=true;
-  const button=document.querySelector('[data-sync-action="exportTeamExcel"]');
+  const button=document.querySelector(withCost?'[data-sync-action="exportTeamExcelWithCost"]':'[data-sync-action="exportTeamExcel"]');
+  const originalLabel=button?.textContent||'⬇ Export Excel';
+  let costData=null;
   if(button){button.disabled=true;button.textContent='Preparing Excel…'}
   try{
+    // Cost data is NEVER requested for standard staff exports.
+    if(withCost)costData=await window.LISelectionCosts.lookup(items.map(x=>x.record));
     if(!window.ExcelJS){
-      exportTeamCsv(items);
+      exportTeamCsv(items,withCost,costData||[]);
       alert('The Excel library did not load. A CSV without photos has been downloaded instead.');
       return;
     }
@@ -460,17 +476,27 @@ async function exportTeamExcel(){
     });
     // Match the supplied example exactly: one header row and nine columns.
     // No report title, metadata, staff, status or exported-date columns.
-    sheet.columns=[{width:7},{width:22},{width:27},{width:35},{width:20},{width:22},{width:9},{width:23},{width:42}];
-    sheet.getRow(1).values=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request'];
+    sheet.columns=[{width:7},{width:22},{width:27},{width:35},{width:20},{width:22},{width:9},{width:23},{width:42},
+      ...(withCost?[{width:18},{width:18}]:[])];
+    sheet.getRow(1).values=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request',
+      ...(withCost?['Unit Cost','Total Cost']:[])];
     sheet.getRow(1).font={bold:true,color:{argb:'FF17304D'},size:11};
     sheet.getRow(1).alignment={vertical:'middle'};
     sheet.getRow(1).height=28;
     for(let n=0;n<items.length;n++){
       const info=items[n],i=n+2,row=sheet.getRow(i);
       row.values=[info.number,'',info.code,info.description,info.original,info.requested,info.qty,info.finish,info.request];
+      if(withCost){
+        const cost=costData[n];
+        const amount=cost?Number(cost.unit_cost):null,qty=Number(info.qty);
+        row.getCell(10).value=cost&&Number.isFinite(amount)?amount:null;
+        row.getCell(11).value=cost&&Number.isFinite(amount)&&Number.isFinite(qty)?Number((amount*qty).toFixed(4)):null;
+        row.getCell(10).numFmt='"$"#,##0.00';
+        row.getCell(11).numFmt='"$"#,##0.00';
+      }
       row.height=83;
       row.alignment={vertical:'middle',wrapText:true};
-      for(let col=1;col<=9;col++){
+      for(let col=1;col<=(withCost?11:9);col++){
         sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
       }
       // Never embed original price-list PDFs or unapproved external URLs.
@@ -489,15 +515,16 @@ async function exportTeamExcel(){
     const buf=await book.xlsx.writeBuffer();
     const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url=URL.createObjectURL(blob),link=document.createElement('a');
-    link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
+    link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.xlsx';
     document.body.appendChild(link);link.click();link.remove();
     setTimeout(()=>URL.revokeObjectURL(url),15000);
   }catch(err){
     console.error('Team Excel export failed',err);
-    try{exportTeamCsv(items);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
+    if(withCost&&!costData)alert('Secure cost lookup failed; nothing was exported.');
+    else try{exportTeamCsv(items,withCost,costData||[]);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
   }finally{
     exportingTeamExcel=false;
-    if(button){button.disabled=false;button.textContent='⬇ Export Excel'}
+    if(button){button.disabled=false;button.textContent=originalLabel}
   }
 }
  function teamBrandFilterToolbar(){
@@ -508,7 +535,12 @@ async function exportTeamExcel(){
    '<select id="liTeamBrandFilter" aria-label="Filter team selections by brand">'+
    '<option value="all"'+(teamBrandFilter==='all'?' selected':'')+'>All brands ('+all+')</option>'+
    options+'</select>'+
-   '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export Excel</button>'+
+   (['Super Admin','Admin'].includes(role)?
+     '<details class="li-export-choice"><summary class="btn secondary small"'+(!filtered?' aria-disabled="true"':'')+'>⬇ Export Excel ▾</summary>'+
+     '<div class="li-export-menu"><button type="button" class="btn quiet small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>Without Cost</button>'+
+     '<button type="button" class="btn quiet small" data-sync-action="exportTeamExcelWithCost"'+(!filtered?' disabled':'')+'>With Cost · Admin only</button></div></details>'+
+     '<button type="button" class="btn quiet small" data-sync-action="toggleTeamCosts">Show / hide costs</button>':
+     '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export Excel</button>')+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
 
@@ -651,7 +683,8 @@ async function exportTeamExcel(){
      '<div class="team-list-state"><div class="team-list-badges">'+
       '<span class="pill '+(decision==='Approved'?'green':decision==='Rejected'?'warn':'gold')+'">'+esc(decision)+'</span>'+
       '<span class="pill">'+esc(status)+'</span></div>'+
-      '<span class="team-list-qty">Qty '+esc(r.qty??'—')+'</span></div>'+
+      '<span class="team-list-qty">Qty '+esc(r.qty??'—')+'</span>'+
+      (['Super Admin','Admin'].includes(role)?(window.LISelectionCosts?.rowMarkup?.(r)||''):'')+'</div>'+
      '<div class="team-list-actions">'+(approve||importAction||
        '<span class="tiny">Reviewed</span>')+(approve&&importAction?importAction:'')+'</div>'+
     '</div>'+details+'</article>';
@@ -742,7 +775,9 @@ async function exportTeamExcel(){
     .catch(err=>{userManageIsError=true;userManageNotice='Unable to refresh users: '+err.message})
     .finally(()=>{userManageBusy=false;renderTeamManagement()});return;
   }
-  if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel();if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
+  if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(false);if(act==='exportTeamExcelWithCost')exportTeamExcel(true);
+  if(act==='toggleTeamCosts'&&['Super Admin','Admin'].includes(role))window.LISelectionCosts?.toggle?.(filteredTeamRecords(),paint).catch(err=>alert(err.message));
+  if(act==='setCost'&&['Super Admin','Admin'].includes(role)){const target=records.find(x=>x.recordId===b.dataset.recordId);if(target)window.LISelectionCosts?.setForRecord?.(target,paint).catch(err=>alert(err.message))}if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){window.LISelectionCosts?.signOut?.();disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
  async function publishCentralCatalog(form){if(role!=='Super Admin')return;const d=new FormData(form),brandId=String(d.get('brandId')||''),driveFile=String(d.get('driveFile')||'').trim();if(!confirm('Publish this private Drive catalog to authorized staff?'))return;try{const result=await call('publishCatalog',{brandId,driveFile,confirmUntagged:d.has('confirmUntagged')});await refresh();if(result.brandId===ACTIVE_BRAND_ID)window.LICentralCatalog?.ensureBrand(brandId,true).catch(()=>{});alert(result.itemCount+' products published for '+brandId);paint()}catch(err){alert('Catalog publishing failed: '+err.message)}}
  function init(){
