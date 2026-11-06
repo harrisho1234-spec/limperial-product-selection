@@ -275,6 +275,30 @@ async function onCredential(credential){if(!credential?.credential)return;token=
  }
  async function moderate(id,action){if(!hasRole())return;const r=records.find(x=>x.recordId===id);if(!r)return;const decision=action==='approve'?'Approved':action==='reject'?'Rejected':'Select';const supplierStatus=action==='approve'?'Confirmed':r.supplierStatus;
   try{await call('moderate',{recordId:id,expectedRevision:r.revision,decision,supplierStatus});await refresh();status='connected';lastError='';paint()}catch(err){status='error';lastError=err.message;paint()}}
+ async function assignSupabaseMember(address,assignedRole,active,name){
+   if(role!=='Super Admin'||!window.LISelectionIdentity?.status()?.signedIn)throw Error('Super Admin sign-in required');
+   const {error}=await window.LISelectionIdentity.client().rpc('product_selection_assign_member',{
+    target_email:address,assigned_role:assignedRole,target_active:active,target_name:name
+   });
+   if(error)throw Error('Unable to update Supabase account: '+error.message+'. Make sure the staff member already has a Supabase Auth account.');
+ }
+ async function syncExistingMembers(){
+  if(role!=='Super Admin'||userManageBusy)return;
+  if(!confirm('Synchronize existing Team Management roles into Supabase? Only authorized staff accounts already in Supabase Auth will be updated.'))return;
+  userManageBusy=true;userManageIsError=false;userManageNotice='Synchronizing staff permissions…';renderTeamManagement();
+  let done=0;const failures=[];
+  try{
+   await refresh();
+   for(const user of users){
+     try{await assignSupabaseMember(user.email,user.role,!!user.active,user.name||'');done++}
+     catch(err){failures.push((user.email||'Unknown')+': '+err.message)}
+   }
+   userManageIsError=failures.length>0;
+   userManageNotice='Supabase permissions synchronized: '+done+'/'+users.length+
+     (failures.length?' · '+failures.join('; '):'');
+  }catch(err){userManageIsError=true;userManageNotice='Sync failed: '+err.message}
+  finally{userManageBusy=false;renderTeamManagement()}
+ }
  async function addUser(form){
   if(role!=='Super Admin'||userManageBusy)return;
   const data=new FormData(form),address=String(data.get('email')||'').trim().toLowerCase();
@@ -287,6 +311,7 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   if(userRole==='Super Admin'&&!confirm('Give '+address+' full Super Admin access, including confidential supplier prices and user management?'))return;
   userManageBusy=true;userManageNotice='Authorizing '+address+'…';userManageIsError=false;renderTeamManagement();
   try{
+    await assignSupabaseMember(address,userRole,true,name);
     await call('setUser',{email:address,name,role:userRole,active:true});
     await refresh();status='connected';userManageNotice='Account authorized: '+address;userManageIsError=false;
   }catch(e){userManageIsError=true;userManageNotice='Unable to authorize account: '+e.message}
@@ -314,6 +339,7 @@ async function onCredential(credential){if(!credential?.credential)return;token=
   if(nextRole==='Super Admin'&&existing.role!=='Super Admin'&&!confirm('Grant '+address+' full Super Admin permissions, including confidential supplier prices?'))return;
   userManageBusy=true;userManageNotice='Saving '+address+'…';userManageIsError=false;renderTeamManagement();
   try{
+    await assignSupabaseMember(address,nextRole,active,name);
     await call('setUser',{email:address,name,role:nextRole,active});
     await refresh();status='connected';editingUserEmail='';
     userManageNotice='Updated '+address+' successfully.';userManageIsError=false;
@@ -713,13 +739,13 @@ async function exportTeamExcel(mode='without'){
      '</select></label><label class="field"><span>Access status</span><select name="active"'+(own?' disabled':'')+'>'+
      '<option value="true"'+(u.active?' selected':'')+'>Active</option>'+
      '<option value="false"'+(!u.active?' selected':'')+'>Inactive</option></select></label></div>'+
-     '<p class="tiny">Google email is the account identifier. To change it, authorize the new email and deactivate the old one.</p>'+
+     '<p class="tiny">Supabase email is the account identifier. To change it, authorize the new email and deactivate the old one.</p>'+
      '<div class="row-actions"><button type="submit" class="btn small"'+(userManageBusy?' disabled':'')+'>Save changes</button>'+
      '<button type="button" class="btn quiet small" data-sync-action="cancelUserEdit"'+(userManageBusy?' disabled':'')+'>Cancel</button></div></form></article>';
   }).join('');
   root.innerHTML='<div class="tm-page"><div class="candidate-row"><div class="variant-top">'+
-   '<div><h2>Manage team access</h2><p class="muted">Manage Google accounts allowed to use Product Selection. Changes are enforced by the private Apps Script authorization service.</p></div>'+
-   '<button class="btn secondary small" type="button" data-sync-action="refreshUsers"'+(userManageBusy?' disabled':'')+'>↻ Refresh accounts</button></div>'+
+   '<div><h2>Manage team access</h2><p class="muted">Manage Supabase staff access. Changes update Supabase roles and the private Google Sheets allowlist.</p></div>'+
+   '<div class="row-actions"><button class="btn secondary small" type="button" data-sync-action="syncSupabaseMembers"'+(userManageBusy?' disabled':'')+'>Sync existing roles to Supabase</button><button class="btn secondary small" type="button" data-sync-action="refreshUsers"'+(userManageBusy?' disabled':'')+'>↻ Refresh accounts</button></div></div>'+
    '<div class="tm-stats"><span><b>'+activeCount+'</b> Active</span><span><b>'+(list.length-activeCount)+'</b> Inactive</span>'+
    '<span><b>'+list.length+'</b> Total accounts</span></div>'+
    (userManageNotice?'<p role="status" class="'+(userManageIsError?'alert':'tm-success')+'">'+esc(userManageNotice)+'</p>':'')+
@@ -727,7 +753,7 @@ async function exportTeamExcel(mode='without'){
    '<div class="candidate-row tm-add-card"><h2>Authorize new team member</h2>'+
    '<p class="tiny">New users must sign in with the email approved here. Only Super Admin can create, edit, or deactivate accounts.</p>'+
    '<form id="liTeamAddUser"><div class="tm-fields">'+
-   '<label class="field"><span>Google email</span><input name="email" type="email" autocomplete="off" maxlength="255" placeholder="staff@example.com" required></label>'+
+   '<label class="field"><span>Staff email</span><input name="email" type="email" autocomplete="off" maxlength="255" placeholder="staff@example.com" required></label>'+
    '<label class="field"><span>Display name</span><input name="name" maxlength="100" placeholder="Employee name"></label>'+
    '<label class="field"><span>Assigned role</span><select name="role">'+roleOptions('Staff')+'</select></label></div>'+
    '<div class="row-actions"><button class="btn" type="submit"'+(userManageBusy?' disabled':'')+'>Authorize user</button></div></form></div></div>';
@@ -772,6 +798,7 @@ async function exportTeamExcel(mode='without'){
   if(act==='cancelUserEdit'&&role==='Super Admin'&&VIEW==='team-management'){
    editingUserEmail='';userManageNotice='';renderTeamManagement();return;
   }
+  if(act==='syncSupabaseMembers'&&role==='Super Admin'&&VIEW==='team-management'){syncExistingMembers();return}
   if(act==='refreshUsers'&&role==='Super Admin'&&VIEW==='team-management'&&!userManageBusy){
    userManageBusy=true;userManageNotice='Refreshing authorized accounts…';userManageIsError=false;renderTeamManagement();
    refresh().then(()=>{status='connected';userManageNotice='Team directory refreshed.';userManageIsError=false})
