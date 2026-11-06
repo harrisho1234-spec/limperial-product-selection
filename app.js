@@ -167,7 +167,7 @@ function renderDiscover(){
   </select>`:'';
  const note=ACTIVE_BRAND_ID==='asfour'?
    `${informationCount} confirmed editorial pages separated; all original records and selections are preserved.`:
-   ACTIVE_BRAND_ID==='tl'?'Tong Luo · 260 visual page references; some pages show multiple designs. Confirm the exact model code and dimensions before ordering.':
+   ACTIVE_BRAND_ID==='tl'?'Tong Luo · Open Pick product, crop one chandelier, then enter the printed model code. Original pages remain unchanged.':
    'Scanned catalogs may contain visual references needing supplier verification';
  const items=filteredCatalogItems(),visible=items.slice(0,LIMIT);
  $('app').innerHTML=`${pricePhotoNotice()}<div class="toolbar"><div class="search">
@@ -183,8 +183,8 @@ function catalogCard(i){
  const added=!!S.catalog[i.id],sel=S.shortlist.includes(i.id);
  const tlPage=ACTIVE_BRAND_ID==='tl'&&i.source==='tl-chandelier'&&!i.splitGenerated;
  const editorial=isAsfourInformationPage(i);
- const label=editorial?'Catalog information':i.photoKind==='supplier-photo'?'Product photo':i.photoKind==='catalog-crop'?'Individual design':i.code?'Product · PDF preview':'Catalog page';
- const description=editorial?'Editorial/reference page — not a coded product':(i.code?(i.name||'Chandelier'):'Visual reference only');
+ const label=tlPage?'Choose a model':editorial?'Catalog information':i.photoKind==='supplier-photo'?'Product photo':i.photoKind==='catalog-crop'?'Individual design':i.code?'Product · PDF preview':'Catalog page';
+ const description=tlPage?'Multi-design catalog page · pick one chandelier':editorial?'Editorial/reference page — not a coded product':(i.code?(i.name||'Chandelier'):'Visual reference only');
  return `<article class="card"><div class="card-photo">${sprite(i.sprite)}<span class="float-tag">${q(label)}</span></div>
  <div class="card-info"><div class="card-name">${q(i.code||i.name)}</div>
  <div class="card-meta">${q(description)}</div>
