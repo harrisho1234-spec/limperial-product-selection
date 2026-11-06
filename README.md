@@ -21,3 +21,13 @@ Selections are saved to this browser/device only. Use the **Backup** feature to 
 - This independent app: `harrisho1234-spec/limperial-product-selection`
 
 Do not upload supplier catalog PDFs, product price lists, private selection JSON, or private purchasing data to the public repository.
+
+## Confidential Asfour supplier list-price references
+
+The Asfour 2025 PDF list-price codes (1,063) and the 2022 historical PDF price references (949; 300 codes not in the current catalog) are stored only in the Supabase table `public.product_selection_supplier_list_prices`. **Do not upload PDF price lists, spreadsheet price exports, or price JSON to this public repository.**
+
+- RLS permits SELECT only for active Product Selection **Super Admin / Admin** members. Anonymous and staff accounts cannot query this table.
+- In Asfour **Discover** or **Design families**, use **Show Asfour list prices · Admin** to retrieve the prices after verifying your Supabase staff account. **Hide** clears the visible reference cache.
+- In **Team selections**, Admin **Show / hide costs** shows the separate supplier list-price reference and the existing manually entered actual unit cost; staff exports never include either.
+- Full supplier-code matching includes finish/crystal suffixes. 2025 takes precedence. A 2022-only price is explicitly marked historical.
+- The PDFs provide **listed USD prices, not negotiated net purchase cost or landed cost**. Existing actual-cost records are never auto-populated or overwritten.
