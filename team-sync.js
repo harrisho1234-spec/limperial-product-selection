@@ -312,6 +312,28 @@ async function onSupabaseIdentity(identity){
  }
  async function moderate(id,action){if(!hasRole())return;const r=records.find(x=>x.recordId===id);if(!r)return;const decision=action==='approve'?'Approved':action==='reject'?'Rejected':'Select';const supplierStatus=action==='approve'?'Confirmed':r.supplierStatus;
   try{await call('moderate',{recordId:id,expectedRevision:r.revision,decision,supplierStatus});await refresh();status='connected';lastError='';paint()}catch(err){status='error';lastError=err.message;paint()}}
+ async function syncSupabaseMember(address,details){
+  if(role!=='Super Admin')throw Error('Only Super Admin can edit staff access.');
+  const api=await window.LISupabaseAuth.getClient();
+  const {data:profile,error:profileErr}=await api.from('app_users')
+    .select('user_id,email').eq('email',address).maybeSingle();
+  if(profileErr||!profile?.user_id)throw Error('Create the staff account in Supabase Auth first, then add it to the Product Selection team.');
+  const {data:previous,error:readErr}=await api.from('product_selection_members')
+    .select('user_id,role,active,display_name').eq('user_id',profile.user_id).maybeSingle();
+  if(readErr)throw Error('Could not read the existing Product Selection membership.');
+  const values={role:details.role,active:!!details.active,display_name:details.name||address,updated_at:new Date().toISOString()};
+  const write=previous?
+    await api.from('product_selection_members').update(values).eq('user_id',profile.user_id):
+    await api.from('product_selection_members').insert({user_id:profile.user_id,...values});
+  if(write.error)throw Error('Supabase denied the account change: '+write.error.message);
+  return async()=>{
+   const rollback=previous?
+    await api.from('product_selection_members').update({role:previous.role,active:previous.active,
+     display_name:previous.display_name}).eq('user_id',profile.user_id):
+    await api.from('product_selection_members').delete().eq('user_id',profile.user_id);
+   if(rollback.error)throw Error('Supabase rollback failed: '+rollback.error.message);
+  };
+ }
  async function addUser(form){
   if(role!=='Super Admin'||userManageBusy)return;
   const data=new FormData(form),address=String(data.get('email')||'').trim().toLowerCase();
@@ -324,8 +346,10 @@ async function onSupabaseIdentity(identity){
   if(userRole==='Super Admin'&&!confirm('Give '+address+' full Super Admin access, including confidential supplier prices and user management?'))return;
   userManageBusy=true;userManageNotice='Authorizing '+address+'…';userManageIsError=false;renderTeamManagement();
   try{
-    await call('setUser',{email:address,name,role:userRole,active:true});
-    await refresh();status='connected';userManageNotice='Account authorized: '+address;userManageIsError=false;
+    const undo=await syncSupabaseMember(address,{name,role:userRole,active:true});
+    try{await call('setUser',{email:address,name,role:userRole,active:true})}
+    catch(e){await undo();throw e}
+    await refresh();status='connected';userManageNotice='Supabase account authorized: '+address;userManageIsError=false;
   }catch(e){userManageIsError=true;userManageNotice='Unable to authorize account: '+e.message}
   finally{userManageBusy=false;renderTeamManagement()}
  }
@@ -351,9 +375,11 @@ async function onSupabaseIdentity(identity){
   if(nextRole==='Super Admin'&&existing.role!=='Super Admin'&&!confirm('Grant '+address+' full Super Admin permissions, including confidential supplier prices?'))return;
   userManageBusy=true;userManageNotice='Saving '+address+'…';userManageIsError=false;renderTeamManagement();
   try{
-    await call('setUser',{email:address,name,role:nextRole,active});
+    const undo=await syncSupabaseMember(address,{name,role:nextRole,active});
+    try{await call('setUser',{email:address,name,role:nextRole,active})}
+    catch(e){await undo();throw e}
     await refresh();status='connected';editingUserEmail='';
-    userManageNotice='Updated '+address+' successfully.';userManageIsError=false;
+    userManageNotice='Updated Supabase membership for '+address+'.';userManageIsError=false;
   }catch(e){userManageIsError=true;userManageNotice='Unable to update '+address+': '+e.message}
   finally{userManageBusy=false;renderTeamManagement()}
  }
@@ -740,21 +766,21 @@ async function exportTeamExcel(withCost=false){
      '</select></label><label class="field"><span>Access status</span><select name="active"'+(own?' disabled':'')+'>'+
      '<option value="true"'+(u.active?' selected':'')+'>Active</option>'+
      '<option value="false"'+(!u.active?' selected':'')+'>Inactive</option></select></label></div>'+
-     '<p class="tiny">Google email is the account identifier. To change it, authorize the new email and deactivate the old one.</p>'+
+     '<p class="tiny">Supabase email is the account identifier. To change it, create the new Supabase account and deactivate the old one.</p>'+
      '<div class="row-actions"><button type="submit" class="btn small"'+(userManageBusy?' disabled':'')+'>Save changes</button>'+
      '<button type="button" class="btn quiet small" data-sync-action="cancelUserEdit"'+(userManageBusy?' disabled':'')+'>Cancel</button></div></form></article>';
   }).join('');
   root.innerHTML='<div class="tm-page"><div class="candidate-row"><div class="variant-top">'+
-   '<div><h2>Manage team access</h2><p class="muted">Manage Google accounts allowed to use Product Selection. Changes are enforced by the private Apps Script authorization service.</p></div>'+
+   '<div><h2>Manage team access</h2><p class="muted">Manage Product Selection Supabase roles and access, mirrored to the private Team Sync directory.</p></div>'+
    '<button class="btn secondary small" type="button" data-sync-action="refreshUsers"'+(userManageBusy?' disabled':'')+'>↻ Refresh accounts</button></div>'+
    '<div class="tm-stats"><span><b>'+activeCount+'</b> Active</span><span><b>'+(list.length-activeCount)+'</b> Inactive</span>'+
    '<span><b>'+list.length+'</b> Total accounts</span></div>'+
    (userManageNotice?'<p role="status" class="'+(userManageIsError?'alert':'tm-success')+'">'+esc(userManageNotice)+'</p>':'')+
    '<div class="tm-directory">'+(cards||'<p>No authorized users returned. Refresh accounts to try again.</p>')+'</div></div>'+
    '<div class="candidate-row tm-add-card"><h2>Authorize new team member</h2>'+
-   '<p class="tiny">New users must sign in with the email approved here. Only Super Admin can create, edit, or deactivate accounts.</p>'+
+   '<p class="tiny">New users must already exist in Supabase Auth and app_users; authorize them here to access Product Selection. Only Super Admin can edit access.</p>'+
    '<form id="liTeamAddUser"><div class="tm-fields">'+
-   '<label class="field"><span>Google email</span><input name="email" type="email" autocomplete="off" maxlength="255" placeholder="staff@example.com" required></label>'+
+   '<label class="field"><span>Supabase email</span><input name="email" type="email" autocomplete="off" maxlength="255" placeholder="staff@example.com" required></label>'+
    '<label class="field"><span>Display name</span><input name="name" maxlength="100" placeholder="Employee name"></label>'+
    '<label class="field"><span>Assigned role</span><select name="role">'+roleOptions('Staff')+'</select></label></div>'+
    '<div class="row-actions"><button class="btn" type="submit"'+(userManageBusy?' disabled':'')+'>Authorize user</button></div></form></div></div>';
