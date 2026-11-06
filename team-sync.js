@@ -15,9 +15,9 @@
  function self(){return {email,role,name:displayName}}
  function hasRole(){return ['Super Admin','Admin','Manager'].includes(role)}
  function normalizeConfigValue(value){return String(value??'').replace(/[\s\u200B-\u200D\uFEFF]+/g,'')}
- function settingsValid(){return /^\d+-[a-z0-9-]+\.apps\.googleusercontent\.com$/i.test(normalizeConfigValue(config.clientId))&&/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(normalizeConfigValue(config.scriptUrl))}
+ function settingsValid(){return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(normalizeConfigValue(config.scriptUrl))}
  function clearRememberedSession(){try{sessionStorage.removeItem(SESSION_KEY)}catch(_){}}
- function tokenExpiresAt(t){try{const p=JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));return p.aud===config.clientId&&Number.isFinite(Number(p.exp))?Number(p.exp)*1000:0}catch(_){return 0}}
+ function tokenExpiresAt(t){try{const p=JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));return p.aud==='authenticated'&&p.iss==='https://msxvnaintafqdgheutfu.supabase.co/auth/v1'&&Number.isFinite(Number(p.exp))?Number(p.exp)*1000:0}catch(_){return 0}}
  function rememberVerifiedSession(){const expiry=tokenExpiresAt(token);if(!email||!role||expiry<=Date.now()+60000)return;try{sessionStorage.setItem(SESSION_KEY,JSON.stringify({token,expires:expiry,clientId:config.clientId}))}catch(_){}}
  function restoreRememberedSession(){try{const saved=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');if(!saved||saved.clientId!==config.clientId||saved.expires<=Date.now()+60000||saved.expires!==tokenExpiresAt(saved.token)){clearRememberedSession();return false}token=saved.token;status='connecting';return true}catch(_){clearRememberedSession();return false}}
  function invalidIdentity(err){return /SIGN_IN_EXPIRED|SIGN_IN_REQUIRED|INVALID_GOOGLE_IDENTITY|ACCESS_DENIED|invalid token|expired token/i.test(String(err?.message||''))}
@@ -60,50 +60,26 @@
   const signout=document.getElementById('liGlobalSignout');if(signout)signout.hidden=!allowed;
   const account=document.getElementById('liAccountLabel');if(account)account.textContent=allowed?email+' · '+role:'';
   gate.setAttribute('aria-hidden',allowed?'true':'false');
-  if(allowed){
-   if(!hasUnlockedOnce){
-    hasUnlockedOnce=true;
-    // The full application renders its own landing screen after authorization.
-    // Do not call the Team selections renderer here.
-    window.LIAppAuthorized?.({email,role});
-   }
-   return;
-  }
-  // Never expose navigation, downloads, or cached catalogs without a freshly
-  // server-authorized email and role. A restored token is verified first.
-  const mode=!settingsValid()?'config':token?'verifying':'signin';
+  if(allowed){if(!hasUnlockedOnce){hasUnlockedOnce=true;window.LIAppAuthorized?.({email,role})}return}
+  const identity=window.LISelectionIdentity?.status();
+  const mode=identity?.signedIn?'verifying':'signin';
   if(content.dataset.liGateMode!==mode){
-   content.dataset.liGateMode=mode;
-   if(mode==='config'){
-    content.innerHTML='<p class="li-auth-error">This device needs the approved Product Selection connection settings.</p>'+
-      '<form id="liSyncConfigForm"><div class="field"><label>Apps Script Web App /exec URL</label><input type="url" name="scriptUrl" required placeholder="https://script.google.com/macros/s/…/exec"></div>'+
-      '<div class="field" style="margin-top:12px"><label>Google Web OAuth Client ID</label><input name="clientId" required placeholder="…apps.googleusercontent.com"></div>'+
-      '<div class="li-auth-actions"><button type="submit" class="btn">Save connection settings</button></div></form>';
-   }else{
-    content.innerHTML='<p id="liGateAuthStatus" class="li-auth-status" role="status"></p>'+
-      '<div id="liGateError" class="li-auth-error" role="alert" hidden></div>'+
-      '<div id="liGateGoogleSignIn"></div>'+
-      '<div class="li-auth-actions"><button type="button" class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button>'+
-      '<button type="button" class="btn secondary small" data-sync-action="retryConnection">Retry connection</button>'+
-      '<button type="button" class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button>'+
-      '<button type="button" class="btn quiet small" data-sync-action="signout">Change Google account</button></div>';
-   }
+    content.dataset.liGateMode=mode;
+    content.innerHTML=mode==='signin'?
+      '<form id="liSupabaseLogin" class="li-auth-form">'+
+      '<label class="field">Staff email<input name="email" type="email" autocomplete="username" required placeholder="staff@example.com"></label>'+
+      '<label class="field">Password<input name="password" type="password" autocomplete="current-password" required></label>'+
+      '<button type="submit" class="btn">Sign in</button></form>'+
+      '<p class="tiny">Only authorized accounts can access private supplier catalogs.</p>'+
+      '<p id="liSupabaseSignInError" class="alert" role="alert" hidden></p>':
+      '<p>Signed in. Verifying your role and the private supplier catalog service…</p>'+
+      '<div class="row-actions"><button type="button" class="btn secondary" data-sync-action="retryConnection">Retry connection</button>'+
+      '<button type="button" class="btn quiet" data-sync-action="signout">Sign out</button></div>';
   }
-  const stat=document.getElementById('liGateAuthStatus');
-  if(stat)stat.textContent=token?
-   'Google account received. Verifying email and assigned role with L\'Imperial Team Sync…':
-   'Use the Google account approved by your Super Admin.';
-  const error=document.getElementById('liGateError');
-  if(error){error.textContent=lastError||'';error.hidden=!lastError;}
-  const retry=document.querySelector('#liAuthGate [data-sync-action="retryConnection"]');
-  if(retry)retry.hidden=!token;
-  const change=document.querySelector('#liAuthGate [data-sync-action="signout"]');
-  if(change)change.hidden=!token;
-  const signin=document.querySelector('#liAuthGate [data-sync-action="retrySignIn"]');
-  if(signin)signin.hidden=!!token;
-  const slot=document.getElementById('liGateGoogleSignIn');
-  if(slot)slot.hidden=!!token;
-  if(!token)showGoogleButton();
+  if(mode==='verifying'&&lastError){
+    const err=content.querySelector('.alert');
+    if(err){err.textContent=lastError;err.hidden=false}
+  }
  }
  function info(text){const n=document.getElementById('teamSyncNotice');if(n)n.textContent=text}
  function paint(){syncAccessGate();if(typeof VIEW!=='undefined'&&VIEW==='team'&&statusView().connected)render()}
@@ -765,13 +741,21 @@ async function exportTeamExcel(mode='without'){
  async function publishCentralCatalog(form){if(role!=='Super Admin')return;const d=new FormData(form),brandId=String(d.get('brandId')||''),driveFile=String(d.get('driveFile')||'').trim();if(!confirm('Publish this private Drive catalog to authorized staff?'))return;try{const result=await call('publishCatalog',{brandId,driveFile,confirmUntagged:d.has('confirmUntagged')});await refresh();if(result.brandId===ACTIVE_BRAND_ID)window.LICentralCatalog?.ensureBrand(brandId,true).catch(()=>{});alert(result.itemCount+' products published for '+brandId);paint()}catch(err){alert('Catalog publishing failed: '+err.message)}}
  function init(){
   syncAccessGate();
-  if(!settingsValid())return;
-  // Only the current browser session remembers the short-lived ID credential.
-  // Apps Script verifies it again before returning any private data.
-  const restored=restoreRememberedSession();
-  if(restored)authenticateCurrentToken();
-  loadGsi().then(()=>{initializeGoogleIdentity();showGoogleButton();if(!token)offerReturningGoogleSignIn()})
-   .catch(err=>{console.warn('Google auto sign-in unavailable',err);lastError=err.message;syncAccessGate()});
-}
+  if(!settingsValid()){lastError='Apps Script bridge URL is not configured';paint();return}
+  const identity=window.LISelectionIdentity;
+  if(!identity){lastError='Supabase login library was not loaded';paint();return}
+  identity.onChange(next=>{
+    const currentToken=next.signedIn?next.accessToken:'';
+    if(currentToken===token)return;
+    if(currentToken){token=currentToken;authenticateCurrentToken()}
+    else if(token){disconnect(true,false);status='auth-required';paint()}
+    else paint();
+  });
+  identity.init().then(next=>{
+    if(next.signedIn&&next.accessToken){
+      token=next.accessToken;authenticateCurrentToken();
+    }else{status='auth-required';paint()}
+  }).catch(err=>{status='auth-required';lastError=err.message;paint()});
+ }
  window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),refresh,disconnect,request:call};
 })();
