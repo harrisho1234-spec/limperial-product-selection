@@ -8,6 +8,7 @@
  const PUBLISHABLE_KEY='sb_publishable_RpLdBcXql9MpBZCU-GLqPQ_G3VKM8zd';
  const MEMBERS='product_selection_members';
  const COSTS='product_selection_supplier_costs';
+ const LIST_PRICES='product_selection_supplier_list_prices';
  const ADMIN_ROLES=['Admin','Super Admin'];
  // One session for staff login and Admin cost access; isolated per browser session.
  const COST_AUTH_STORAGE='li-product-selection-supabase-session-v1';
@@ -33,6 +34,7 @@
   return client;
  }
  let visible=false,known=new Map(),lastIdentity=null,loginOpen=false;
+ let listPriceVisible=false,listPriceByCode=new Map();
  async function verifiedAccount(){
   const api=await ensureClient();
   const {data:{user}={},error}=await api.auth.getUser();
@@ -155,13 +157,51 @@
   const byKey=new Map(all.map(c=>[[c.brand_id,c.item_kind,c.item_id,c.spec_key].join('|'),c]));
   return keys.map(k=>byKey.get([k.brand_id,k.item_kind,k.item_id,k.spec_key].join('|'))||null);
  }
+
+ async function lookupListPrices(codes){
+  await identity();
+  const normalized=[...new Set((codes||[]).map(x=>String(x||'').trim()).filter(Boolean))];
+  if(!normalized.length)return [];
+  const result=[];
+  for(let i=0;i<normalized.length;i+=90){
+   const {data,error}=await client.from(LIST_PRICES)
+    .select('supplier_code,list_price_2025,list_price_2022,source_page_2025,source_page_2022')
+    .eq('brand_id','asfour').in('supplier_code',normalized.slice(i,i+90)).limit(120);
+   if(error)throw Error('Confidential Asfour price-list access denied. Check Admin login.');
+   result.push(...(data||[]));
+  }
+  return result;
+ }
+ function listPriceForCode(code){return listPriceVisible&&isExistingAdmin()?listPriceByCode.get(String(code||'').trim())||null:null}
+ function listPriceMarkup(code){
+  const p=listPriceForCode(code);
+  if(!p)return '';
+  const latest=p.list_price_2025==null?null:Number(p.list_price_2025);
+  const historical=p.list_price_2022==null?null:Number(p.list_price_2022);
+  const summary=latest!=null?'Asfour 2025 list: '+format(latest):historical!=null?'Asfour 2022 list (historical): '+format(historical):'';
+  const changed=latest!=null&&historical!=null&&latest!==historical;
+  if(!summary)return '';
+  return '<div class="li-cost-row li-price-reference"><b>'+safeHtml(summary)+'</b>'+
+    (changed?' <span class="tiny">2022: '+safeHtml(format(historical))+' · historical price differs</span>':'')+
+    '<div class="tiny">Printed supplier list price — NOT confirmed purchase cost</div></div>';
+ }
+ async function toggleAsfourListPrices(codes,reread){
+  if(!isExistingAdmin())throw Error('Admin access required');
+  if(listPriceVisible){listPriceVisible=false;listPriceByCode.clear();reread?.();return;}
+  if(!(await requireAdmin()))return;
+  const refs=await lookupListPrices(codes);
+  listPriceByCode=new Map(refs.map(r=>[r.supplier_code,r]));
+  listPriceVisible=true;reread?.();
+ }
  async function toggle(records,reread){
   if(!isExistingAdmin())return;
-  if(visible){visible=false;known.clear();reread?.();return}
+  if(visible){visible=false;known.clear();listPriceVisible=false;listPriceByCode.clear();reread?.();return}
   if(!(await requireAdmin()))return;
   try{
    const prices=await lookup(records);
+   const refs=await lookupListPrices(records.filter(r=>r.brandId==='asfour').map(r=>r.code||r.item?.code||r.entry?.code));
    known=new Map(records.map((r,i)=>[String(r.recordId||r.id),prices[i]]));
+   listPriceByCode=new Map(refs.map(r=>[r.supplier_code,r]));listPriceVisible=true;
    visible=true;reread?.();
   }catch(err){visible=false;known.clear();alert(err.message)}
  }
@@ -170,7 +210,8 @@
   if(!isVisible())return '';
   const price=known.get(String(record.recordId||record.id));
   const current=price?format(price.unit_cost,price.currency):'Not entered';
-  return '<div class="li-cost-row"><b>Unit Cost:</b> '+safeHtml(current)+
+  return listPriceMarkup(record.brandId==='asfour'?(record.code||record.item?.code||record.entry?.code):'')+
+   '<div class="li-cost-row"><b>Actual Unit Cost:</b> '+safeHtml(current)+
     ' <button class="btn quiet small" type="button" data-sync-action="setCost" data-record-id="'+safeHtml(record.recordId||record.id)+'">Set cost</button></div>';
  }
  async function setForRecord(record,reread){
@@ -188,7 +229,7 @@
   if(visible){const fresh=await lookup([record]);known.set(String(record.recordId||record.id),fresh[0]);reread?.()}
  }
  async function signOut(){
-  visible=false;known.clear();lastIdentity=null;hideLogin();
+  visible=false;known.clear();listPriceVisible=false;listPriceByCode.clear();lastIdentity=null;hideLogin();
   try{window.sessionStorage?.removeItem(COST_AUTH_STORAGE)}catch(_){}
   if(client)await client.auth.signOut().catch(()=>{});
  }
@@ -210,5 +251,7 @@
   }catch(error){err.textContent=error.message;err.hidden=false}
   finally{form.elements.password.value='';btn.disabled=false}
  });
- window.LISelectionCosts={requireAdmin,lookup,toggle,isVisible,rowMarkup,setForRecord,signOut,format};
+ window.LISelectionCosts={requireAdmin,lookup,toggle,isVisible,rowMarkup,setForRecord,signOut,format,
+   lookupListPrices,toggleAsfourListPrices,listPriceMarkup,listPriceForCode,
+   areListPricesVisible:()=>listPriceVisible&&isExistingAdmin()};
 })();
