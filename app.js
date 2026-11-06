@@ -252,20 +252,31 @@ async function publishFamilyForTeam(familyId){
   if(!family)throw Error('Family no longer exists');
   // Only family metadata goes to the private backend. Never sync individual
   // decisions, approval statuses, costs, full source documents or photo bytes.
-  const variants=allVariants().filter(v=>v.familyId===familyId).map(v=>({
-    id:v.id,familyId:v.familyId,type:v.type,code:v.code,
-    originalSize:v.originalSize||v.supplierSize||v.dimension,
-    targetSize:v.targetSize,finish:v.finish,crystal:v.crystal,
-    request:v.request,referenceKind:v.referenceKind,
-    customCreated:!!v.customCreated,isCustomProposal:!!v.isCustomProposal,sprite:v.sprite
-  }));
+  const variants=allVariants().filter(v=>v.familyId===familyId).map(v=>{
+    const e=variantEntry(v);
+    return {
+      id:v.id,familyId:v.familyId,type:v.type,code:e.code||v.code,
+      originalSize:v.originalSize||v.supplierSize||v.dimension,
+      targetSize:e.targetSize||v.targetSize,finish:e.finish||v.finish,crystal:e.crystal||v.crystal,
+      request:e.request||v.request,referenceKind:v.referenceKind,
+      customCreated:!!v.customCreated,isCustomProposal:!!v.isCustomProposal,sprite:v.sprite
+    };
+  });
   if(!confirm('Publish '+(family.mainCode||family.name)+' and '+variants.length+' design versions to all approved staff? This will not publish supplier costs or individual selection decisions.'))return;
   await window.LITeamSync.request('publishFamily',{brandId:ACTIVE_BRAND_ID,
     family:{id:family.id,name:family.name,mainCode:family.mainCode,
       style:family.style,customCreated:!!family.customCreated,sprite:family.sprite},
     variants});
-  await window.LITeamSync.refresh();
-  await window.LICentralCatalog.ensureBrand(ACTIVE_BRAND_ID,true);
+  family.shared=true;
+  // Super Admin may have an unpublished private master catalog on this device.
+  // Publishing a family must never replace that master with a remote copy.
+  if(role==='Super Admin'&&ACTIVE_PACK?.metadata?.centralManaged!==true){
+    await persistActivePack();
+    await window.LITeamSync.refresh();
+  }else{
+    await window.LITeamSync.refresh();
+    await window.LICentralCatalog.ensureBrand(ACTIVE_BRAND_ID,true);
+  }
   toast('Shared design family published for approved staff');
   if(PACK?.family?.some(f=>f.id===familyId))familyDrawer(familyId);
   else{closeDrawer();renderFamilies();}
