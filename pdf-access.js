@@ -1,5 +1,5 @@
 /* Supplier PDF access: original files are never hosted in GitHub.
-   Every document operation requires a Google sign-in and is authorized by Apps Script.
+   Every document operation requires a verified Supabase staff account and is authorized by Apps Script.
    The UI has no direct price-list download URLs for Managers/Staff. */
 'use strict';
 (function(){
@@ -10,7 +10,7 @@
  const admin=()=>role()==='Super Admin';
  const api=()=>window.LITeamSync?.request;
  function intro(){
-  if(!authenticated())return '<div class="candidate-row"><h2>Supplier PDF Catalogs</h2><p>Sign in with Google to view the supplier documents permitted for your role. Confidential price lists are not available to Managers or Staff.</p><button class="btn" data-action="goto" data-to="team">Sign in with Google</button></div>';
+  if(!authenticated())return '<div class="candidate-row"><h2>Supplier PDF Catalogs</h2><p>Sign in with Supabase to view the supplier documents permitted for your role. Confidential price lists are not available to Managers or Staff.</p><button class="btn" data-action="goto" data-to="team">Sign in with Supabase</button></div>';
   return '<div class="candidate-row"><h2>Supplier PDF Catalogs</h2><p>Only price-free General Catalogs are available to Managers. Confidential Price Lists are restricted to Super Admin. Access is checked by the private Google Apps Script service and Google Drive.</p></div>';
  }
  const input=(name,value='',type='text')=>'<input name="'+name+'" type="'+type+'" value="'+escapeHtml(value)+'" required>';
