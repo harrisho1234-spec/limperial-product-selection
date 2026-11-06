@@ -76,6 +76,7 @@ function catalogItemForSelection(id){
   return {...source,id,sourceItemId:source.id,isSelectionCopy:true,
    code:String(entry.code||'').trim(),
    name:String(entry.tlName||'Tong Luo individual chandelier'),
+   dimension:String(entry.tlOriginalSize||''),
    sprite:{...source.sprite,cropRect:crop},
    sourceRef:tlCropSourceRef(source.id,crop),
    verification:entry.code?'Individual model · verify printed supplier code':'Supplier code needs verification',
@@ -234,6 +235,106 @@ function splitPageTools(i){
   const options=[['h2','2 stacked'],['h3','3 stacked'],['v2','2 side by side'],['v3','3 side by side'],['g4','4 in a grid'],['none','Keep original page']];
   return `<div class="candidate-row"><h3>Individual designs on this page</h3><p class="tiny">${q(current)}. Split or adjust the layout when the catalog page shows several products. Each resulting design can be selected independently.</p><div class="split-layout-tools">${options.map(([value,label])=>`<button type="button" class="btn ${original.splitLayout===value||(!original.splitParent&&value==='none')?'':'quiet'} small" data-action="splitPage" data-id="${q(parentId)}" data-layout="${value}">${label}</button>`).join('')}</div><p class="tiny">The exact supplier codes and dimensions are not verified from image-only pages. Your existing selections are never deleted automatically.</p></div>`;
 }
+
+function tlSetPickerCrop(value){
+ if(MODAL?.type!=='tl-pick')return;
+ const rect=validTLCrop(value);
+ if(!rect)return;
+ MODAL.crop=rect.map(n=>Math.round(n*10000)/10000);
+ const box=$('tlCropBox');
+ if(box){
+  const [x,y,w,h]=MODAL.crop;
+  Object.assign(box.style,{left:x*100+'%',top:y*100+'%',width:w*100+'%',height:h*100+'%'});
+ }
+ const item=PACK?.items?.find(x=>x.id===MODAL.id);
+ const preview=$('tlCropPreview');
+ if(preview&&item?.sprite)preview.innerHTML=sprite({...item.sprite,cropRect:MODAL.crop});
+}
+const TL_CROP_PRESETS={
+ full:[0,0,1,1],left:[0,0,0.5,1],right:[0.5,0,0.5,1],
+ upper:[0,0,1,0.5],lower:[0,0.5,1,0.5],
+ lefttop:[0,0,0.5,0.5],righttop:[0.5,0,0.5,0.5],
+ leftbottom:[0,0.5,0.5,0.5],rightbottom:[0.5,0.5,0.5,0.5]
+};
+function tlPickDrawer(id){
+ if(ACTIVE_BRAND_ID!=='tl')return;
+ const item=PACK?.items?.find(x=>x.id===id);
+ if(!item||item.source!=='tl-chandelier')return toast('Open a Tong Luo catalog page');
+ MODAL={type:'tl-pick',id,crop:[0.05,0.05,0.9,0.9]};
+ const presets=[
+ ['full','Full'],['left','Left'],['right','Right'],['upper','Top'],['lower','Bottom'],
+ ['lefttop','Upper left'],['righttop','Upper right'],['leftbottom','Lower left'],['rightbottom','Lower right']
+ ].map(([key,label])=>'<button type="button" class="btn quiet small" data-action="tlCropPreset" data-preset="'+key+'">'+label+'</button>').join('');
+ $('drawerContent').innerHTML=
+ '<div class="drawer-header"><div><div class="tiny">TL · TONG LUO · PDF PAGE '+q(item.page)+'</div><h2>Pick one chandelier from this page</h2></div><button class="close" data-action="close">×</button></div>'+
+ '<div class="drawer-body"><p class="tiny">Draw a rectangle around only the product you want. Enter its exact supplier Model code from the printed label if readable. The original catalog remains unchanged.</p>'+
+ '<div class="tl-picker-grid"><div><div class="tl-picker-label">Original page · draw a box around one chandelier</div>'+
+ '<div id="tlPickCanvas" class="tl-pick-canvas">'+sprite(item.sprite)+'<div id="tlCropBox" class="tl-pick-box"></div></div>'+
+ '<div class="tl-picker-presets">'+presets+'</div></div><div><div class="tl-picker-label">Cropped individual product photo</div>'+
+ '<div id="tlCropPreview" class="tl-pick-preview"></div>'+
+ '<form id="tlPickForm"><div class="variant-fields">'+
+ '<div class="field span2"><label>Supplier model code</label><input name="code" maxlength="120" autocomplete="off" placeholder="e.g. TD-1935-8"></div>'+
+ '<div class="field span2"><label>Product description</label><input name="name" maxlength="220" placeholder="e.g. Gold crystal chandelier"></div>'+
+ '<div class="field span2"><label>Original size (as printed)</label><input name="dimension" maxlength="150" placeholder="e.g. Ø730 × H970 mm"></div>'+
+ '<div class="field span2"><label>Other request / notes</label><input name="request" maxlength="900" placeholder="Finish, crystal, modifications…"></div>'+
+ '</div><p class="tiny">If the code is unreadable, leave it blank. The selection will be flagged for verification and cannot enter a final order until a supplier code is entered.</p>'+
+ '<div class="row-actions"><button class="btn" type="submit">Save one product · Qty 1</button>'+
+ '<button class="btn quiet" type="button" data-action="close">Cancel</button></div></form></div></div></div>';
+ showDrawer();
+ tlSetPickerCrop(MODAL.crop);
+ const canvas=$('tlPickCanvas');
+ if(!canvas)return;
+ let start=null;
+ const pos=e=>{
+  const r=canvas.getBoundingClientRect();
+  return [Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))];
+ };
+ canvas.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse'&&e.button!==0)return;
+  e.preventDefault();start=pos(e);
+  try{canvas.setPointerCapture(e.pointerId)}catch(_){}
+ });
+ canvas.addEventListener('pointermove',e=>{
+  if(!start||MODAL?.type!=='tl-pick')return;
+  const p=pos(e),x=Math.min(p[0],start[0]),y=Math.min(p[1],start[1]);
+  const box=$('tlCropBox');
+  if(box)Object.assign(box.style,{left:x*100+'%',top:y*100+'%',width:Math.abs(p[0]-start[0])*100+'%',height:Math.abs(p[1]-start[1])*100+'%'});
+ });
+ canvas.addEventListener('pointerup',e=>{
+  if(!start||MODAL?.type!=='tl-pick')return;
+  const p=pos(e),rect=[Math.min(start[0],p[0]),Math.min(start[1],p[1]),Math.abs(p[0]-start[0]),Math.abs(p[1]-start[1])];
+  start=null;
+  if(rect[2]>=0.06&&rect[3]>=0.06)tlSetPickerCrop(rect);
+  else tlSetPickerCrop(MODAL.crop);
+ });
+ canvas.addEventListener('pointercancel',()=>{start=null;tlSetPickerCrop(MODAL.crop)});
+}
+function tlSavePickedProduct(form){
+ if(MODAL?.type!=='tl-pick'||ACTIVE_BRAND_ID!=='tl')return;
+ const source=PACK.items.find(x=>x.id===MODAL.id);
+ const rect=validTLCrop(MODAL.crop);
+ if(!source||!rect)return alert('Choose the product photo before saving.');
+ const d=new FormData(form);
+ const code=String(d.get('code')||'').trim().slice(0,120);
+ const name=String(d.get('name')||'').trim().slice(0,220)||
+   (code?'Tong Luo chandelier · '+code:'Tong Luo chandelier · code to verify');
+ const dimension=String(d.get('dimension')||'').trim().slice(0,150);
+ const request=String(d.get('request')||'').trim().slice(0,900);
+ if(!code&&!confirm('Save without a model code? You must verify it before final ordering.'))return;
+ let id;
+ do{id='tl-model-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8)}
+ while(S.catalogDuplicates?.[id]||PACK.items.some(i=>i.id===id));
+ if(!S.catalogDuplicates)S.catalogDuplicates={};
+ S.catalogDuplicates[id]={
+  sourceItemId:source.id,tlCrop:rect,tlName:name,tlOriginalSize:dimension,
+  code,decision:'Select',supplierStatus:'Not requested',qty:1,targetSize:'',request,crystal:'',finish:''
+ };
+ save();
+ window.LITeamSync?.itemChanged('catalog',id);
+ closeDrawer();setView('selected');
+ toast('Saved one TL product with its own photo');
+}
+
 function itemDrawer(id){const i=catalogItemForSelection(id);if(!i)return;MODAL={type:'item',id};const s=candidateEntry(i),src=PACK.sources[i.source],previous=(PACK.history||[]).filter(x=>x.code===i.code);$('drawerContent').innerHTML=`<div class="drawer-header"><div><div class="tiny">${q(src?.name||'Manual product')} ${i.page?'· PDF page '+q(i.page):''}</div><h2>${q(i.code||'Visual catalog reference')}</h2></div><button class="close" data-action="close">×</button></div><div class="drawer-body"><div class="product-hero">${photo(i.sprite)}<div><p><b>${q(i.name)}</b></p><p class="muted">${q(i.dimension||'Dimensions: supplier verification needed')}</p><p><span class="pill ${i.code?'green':'warn'}">${q(i.verification)}</span></p>${previous.length?'<p class="pill warn">Previously ordered — check stock before reordering</p>':''}<p>${sourceLink(src||{})}${i.page?' · Page '+q(i.page):''}</p>${ACTIVE_BRAND_ID==='asfour'?'':`<div class="row-actions"><label class="btn secondary small">${i.sprite?'Change product photo':'＋ Add product photo'}<input type="file" data-action="productPhoto" data-id="${q(i.id)}" accept="image/png,image/jpeg,image/webp" style="display:none"></label></div>`}</div></div><div class="alert">${i.photoKind==='user-photo'?'Image uploaded for this brand; verify the supplier code and requested finish.':i.photoKind==='supplier-photo'?'Photo cropped from the supplier-code row; crystal and finish variants may share the same reference picture.':i.photoKind==='catalog-crop'?'This is one visual design cropped from a multi-product catalog page. Confirm its exact supplier code, finish and size with the supplier.':'No individually verified product photo. Add one manually or check the original catalog.'}</div>${i.splitGenerated?'<h3>Original catalog page</h3>'+photo(i.pageSprite,'preview')+'<p class="tiny">The full page is retained here to verify the source and product references.</p>':''}${splitPageTools(i)}<h3>Prepare this candidate</h3>${candidateCard(i)}<div class="row-actions"><button class="btn secondary" data-action="shortlist" data-id="${q(i.id)}">${selectionForItem(i.id)?'Already selected':'＋ Add to selections'}</button><button class="btn quiet" data-action="close">Close</button></div></div>`;showDrawer()}
 function customDrawer(id){const f=PACK.family.find(x=>x.id===id);MODAL={type:'custom',id};$('drawerContent').innerHTML=`<div class="drawer-header"><h2>New custom version · ${q(id)}</h2><button class="close" data-action="close">×</button></div><div class="drawer-body"><p class="muted">This creates a proposed version under ${q(f?.mainCode||id)}. It is <b>not</b> confirmed by ${q(brandNow().name)}.</p><form id="newCustomForm"><div class="variant-fields"><div class="field span2"><label>Version type</label><select name="type" required><option>XL chandelier</option><option>Large chandelier</option><option>Medium chandelier</option><option>Linear chandelier</option><option>Wall lamp</option><option>Floor lamp</option><option>Table lamp</option><option>Other</option></select></div><div class="field"><label>Requested size</label><input name="size" required placeholder="L150 × W40 × H80 cm"></div><div class="field"><label>Original reference code</label><input name="code" value="${q(f?.mainCode||'')}" placeholder="Reference, not final code"></div><div class="field span2"><label>Design modifications</label><textarea name="request" placeholder="Matching arms, number of tiers, gold finish, crystal type…" required></textarea></div></div><div class="row-actions"><button class="btn" type="submit">Create custom version</button></div></form></div>`;showDrawer()}
 function compareDrawer(){const a=S.compare.slice(0,2).map(id=>PACK.items.find(x=>x.id===id)).filter(Boolean);if(a.length!==2){toast('Select two catalog candidates to compare');return}MODAL={type:'compare'};$('drawerContent').innerHTML=`<div class="drawer-header"><h2>Compare two designs</h2><button class="close" data-action="close">×</button></div><div class="drawer-body"><div class="compare-grid">${a.map(i=>`<div>${photo(i.sprite)}<p><b>${q(i.code||i.name)}</b></p><p class="tiny">${q(i.dimension||'Size not confirmed')} · ${q(PACK.sources[i.source]?.name||'Supplier catalog')}</p><p>${ACTIVE_BRAND_ID==='asfour'&&i.source==='price'?'<span class="tiny">Supplier reference · original price-list PDF not available in this app</span>':sourceLink(PACK.sources[i.source]||{})}</p></div>`).join('')}</div><div class="alert">Please compare design, room suitability, matching variants and visual similarity. Supplier availability is not implied.</div></div>`;showDrawer()}
