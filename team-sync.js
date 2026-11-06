@@ -172,7 +172,7 @@ async function connectButton(force=false){
 }
 function paintStatusOnly(){const t=document.getElementById('teamSyncNotice');if(t)t.textContent=token?(email&&role?'Signed in as '+email+' · '+role:'Verifying Supabase role and team access…'):'Sign in using Supabase to access team selections';syncAccessGate()}
 async function onCredential(credential){if(!credential?.credential)return;token=credential.credential;clearRememberedSession();await authenticateCurrentToken()}
- function disconnect(keepConfig=true,explicitSignOut=false){if(explicitSignOut)window.LISelectionIdentity?.signOut?.().catch(err=>console.warn(err));
+ function disconnect(keepConfig=true,explicitSignOut=false){teamCostView='without';teamCostLookup=new Map();if(explicitSignOut)window.LISelectionIdentity?.signOut?.().catch(err=>console.warn(err));
   if(explicitSignOut&&window.google?.accounts?.id){
     try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
   }
@@ -510,10 +510,14 @@ async function exportTeamExcel(mode='without'){
   const options=teamBrandOptions();
   const all=records.filter(r=>!r.deleted).length;
   const filtered=filteredTeamRecords().length;
+  const costControl=['Admin','Super Admin'].includes(role)&&window.LISelectionCosts?.authorized()?
+    '<label for="liTeamCostView">View</label><select id="liTeamCostView" aria-label="Supplier cost visibility">'+
+    '<option value="without"'+(teamCostView==='without'?' selected':'')+'>Without Cost</option>'+
+    '<option value="with"'+(teamCostView==='with'?' selected':'')+'>With Cost</option></select>':'';
   return '<div class="team-brand-toolbar"><label for="liTeamBrandFilter">Brand</label>'+
    '<select id="liTeamBrandFilter" aria-label="Filter team selections by brand">'+
    '<option value="all"'+(teamBrandFilter==='all'?' selected':'')+'>All brands ('+all+')</option>'+
-   options+'</select>'+
+   options+'</select>'+costControl+
    (['Admin','Super Admin'].includes(role)&&window.LISelectionCosts?.authorized()?'<div class="li-cost-export-menu"><button type="button" class="btn secondary small" data-sync-action="exportTeamExcel" data-mode="without"'+(!filtered?' disabled':'')+'>⬇ Without Cost</button><button type="button" class="btn secondary small" data-sync-action="exportTeamExcel" data-mode="with"'+(!filtered?' disabled':'')+'>⬇ With Cost</button></div>':
     '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel" data-mode="without"'+(!filtered?' disabled':'')+'>⬇ Export Excel</button>')+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
@@ -750,6 +754,12 @@ async function exportTeamExcel(mode='without'){
      TEAM_DUP_OPEN.set(detail.dataset.teamDuplicateKey,detail.open);
  },true);
  document.addEventListener('change',e=>{
+  if(e.target?.id==='liTeamCostView'){
+   teamCostView=e.target.value==='with'&&window.LISelectionCosts?.authorized()?'with':'without';
+   if(teamCostView==='with')loadTeamCosts().then(()=>paint()).catch(e=>{teamCostView='without';alert(e.message);paint()});
+   else{teamCostLookup=new Map();paint()}
+   return;
+  }
   if(e.target?.id!=='liTeamBrandFilter')return;
   teamBrandFilter=e.target.value||'all';
   try{localStorage.setItem(TEAM_BRAND_FILTER_KEY,teamBrandFilter)}catch(_){}
@@ -768,7 +778,7 @@ async function exportTeamExcel(mode='without'){
     .catch(err=>{userManageIsError=true;userManageNotice='Unable to refresh users: '+err.message})
     .finally(()=>{userManageBusy=false;renderTeamManagement()});return;
   }
-  if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(b.dataset.mode==='with'?'with':'without');if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
+  if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(b.dataset.mode==='with'?'with':'without');if(act==='setSupplierCost')setTeamCost(b.dataset.recordId);if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
  async function publishCentralCatalog(form){if(role!=='Super Admin')return;const d=new FormData(form),brandId=String(d.get('brandId')||''),driveFile=String(d.get('driveFile')||'').trim();if(!confirm('Publish this private Drive catalog to authorized staff?'))return;try{const result=await call('publishCatalog',{brandId,driveFile,confirmUntagged:d.has('confirmUntagged')});await refresh();if(result.brandId===ACTIVE_BRAND_ID)window.LICentralCatalog?.ensureBrand(brandId,true).catch(()=>{});alert(result.itemCount+' products published for '+brandId);paint()}catch(err){alert('Catalog publishing failed: '+err.message)}}
  function init(){
