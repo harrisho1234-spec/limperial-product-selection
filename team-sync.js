@@ -189,8 +189,26 @@ async function connectButton(force=false){
     paint();
   }
 }
-function paintStatusOnly(){const t=document.getElementById('teamSyncNotice');if(t)t.textContent=token?(email&&role?'Signed in as '+email+' · '+role:'Verifying Google sign-in and team access…'):ready?'Google connection ready. Sign in to share selections.':'Sign in with Google to access team selections';syncAccessGate()}
-async function onCredential(credential){if(!credential?.credential)return;token=credential.credential;clearRememberedSession();await authenticateCurrentToken()}
+function paintStatusOnly(){const t=document.getElementById('teamSyncNotice');if(t)t.textContent=token?(email&&role?'Signed in as '+email+' · '+role:'Verifying Supabase sign-in and team access…'):'Sign in with your Supabase staff account';syncAccessGate()}
+async function onSupabaseIdentity(identity){
+  if(!identity?.accessToken)throw Error('Supabase authentication is required');
+  token=identity.accessToken;
+  status='connecting';lastError='';syncAccessGate();
+  await authenticateCurrentToken();
+ }
+ async function supabaseLogin(form){
+  const button=form.querySelector('button[type=submit]');if(button){button.disabled=true;button.textContent='Verifying account…'}
+  lastError='';syncAccessGate();
+  try{
+    const d=new FormData(form);
+    const who=await window.LISupabaseAuth.signIn(String(d.get('email')||''),String(d.get('password')||''));
+    form.elements.password.value='';
+    await onSupabaseIdentity(who);
+  }catch(error){
+    lastError=String(error?.message||error);status='auth-required';token='';email='';role='';displayName='';
+    syncAccessGate();
+  }finally{if(button){button.disabled=false;button.textContent='Sign in with Supabase'}}
+ }
  function disconnect(keepConfig=true,explicitSignOut=false){
   if(explicitSignOut&&window.google?.accounts?.id){
     try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
@@ -741,11 +759,24 @@ async function exportTeamExcel(withCost=false){
    '<label class="field"><span>Assigned role</span><select name="role">'+roleOptions('Staff')+'</select></label></div>'+
    '<div class="row-actions"><button class="btn" type="submit"'+(userManageBusy?' disabled':'')+'>Authorize user</button></div></form></div></div>';
  }
- function render(){const root=document.getElementById('app');if(!root)return;
-  if(!settingsValid()){root.innerHTML=`<div class="candidate-row" style="max-width:760px"><h2>Secure Google Sheets team synchronization</h2><p>Configure your dedicated Google Apps Script service and Google OAuth Client ID. The Google Sheet is private; users must be authorized before seeing any selection.</p><form id="liSyncConfigForm"><div class="field"><label>Apps Script Web App /exec URL</label><input name="scriptUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" required></div><div class="field" style="margin-top:12px"><label>Google OAuth Web Client ID</label><input name="clientId" placeholder="123...apps.googleusercontent.com" required></div><div class="row-actions"><button type="submit" class="btn">Save connection settings</button></div></form><p class="tiny">An Apps Script deployment is required before real-time sharing can begin. Do not paste a password, service account key, or API secret.</p></div>`;return}
-  root.innerHTML=`<div class="candidate-row"><div class="variant-top"><div><h2>Shared Team Selections</h2><p class="tiny" id="teamSyncNotice">${esc(email&&role?'Signed in as '+email+' · '+role:token?'Verifying Google sign-in and team access…':'Sign in with Google to access team selections')}</p>${lastError?`<p class="alert">${esc(lastError)}</p><div class="row-actions"><button class="btn secondary small" data-sync-action="openBridgePopup">Open secure Google connection window</button><a class="btn quiet small" href="'+esc(config.scriptUrl)+'" target="_blank" rel="noopener">Check deployed Web App URL</a></div>`:''}</div><div class="row-actions">${role==='Super Admin'?'<button class="btn quiet small" data-sync-action="reconfigure">Connection settings</button>':''}${token?'<button class="btn quiet small" data-sync-action="signout">Sign out</button>':''}</div></div>${!token?'<div id="liGoogleSignIn" style="min-height:50px;margin:12px 0"></div><p id="teamSyncConnectError" class="alert" hidden></p><div class="row-actions"><button class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button><button class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button></div>':email&&role?`<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button><button class="btn small" data-sync-action="publish">Share my current ${esc(brandNow().name)} selections</button><span class="tiny">Last refreshed: ${esc(lastFetched||'—')} · ${records.length} records</span></div>`:'<div class="row-actions"><button class="btn secondary small" data-sync-action="retryConnection">Retry team connection</button><span class="tiny">Google account received; checking team authorization</span></div>'}<p class="tiny">Approved staff can browse private supplier catalogs after Google sign-in. New selections and edits sync while signed in; previously saved local drafts are not bulk-published automatically.</p></div>${email&&role?`<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>${teamBrandFilterToolbar()}<div class="row-list">${rowsHTML()}</div>${adminCatalogForm()}`:''}`;
-  if(!token){const slot=document.getElementById('liGoogleSignIn');if(slot)slot.insertAdjacentHTML('afterend',repairClientMarkup());showGoogleButton();if(!signInStarted&&status!=='error'){signInStarted=true;connectButton().catch(e=>{status='error';lastError=e.message;paint()})}}}
- document.addEventListener('submit',e=>{if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target);return}if(e.target.matches('[data-team-edit-form]')){e.preventDefault();saveEditedUser(e.target);return}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
+ function render(){
+  const root=document.getElementById('app');if(!root)return;
+  if(!statusView().connected){
+    root.innerHTML='<div class="candidate-row"><h2>Supabase staff access</h2><p class="muted">Sign in with an approved staff account above. Your previous Team selections and approvals remain in the private Team Sync database and its verified backup.</p>'+
+      (lastError?'<p class="alert">'+esc(lastError)+'</p>':'')+'</div>';
+    return;
+  }
+  root.innerHTML='<div class="candidate-row"><div class="variant-top"><div><h2>Shared Team Selections</h2>'+
+    '<p class="tiny" id="teamSyncNotice">Signed in as '+esc(email)+' · '+esc(role)+'</p></div>'+
+    '<div class="row-actions"><button class="btn quiet small" data-sync-action="signout">Sign out</button></div></div>'+
+    '<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button>'+
+    '<button class="btn small" data-sync-action="publish">Share my current '+esc(brandNow().name)+' selections</button>'+
+    '<span class="tiny">Last refreshed: '+esc(lastFetched||'—')+' · '+records.length+' records</span></div>'+
+    '<p class="tiny">Authenticated staff can browse approved private supplier catalogs. Product selections and approvals remain synchronized through the existing protected Google Sheet.</p></div>'+
+    '<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>'+
+    teamBrandFilterToolbar()+'<div class="row-list">'+rowsHTML()+'</div>'+adminCatalogForm();
+ }
+ document.addEventListener('submit',e=>{if(e.target.id==='liSupabaseSignIn'){e.preventDefault();supabaseLogin(e.target);return}if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target);return}if(e.target.matches('[data-team-edit-form]')){e.preventDefault();saveEditedUser(e.target);return}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
  document.addEventListener('toggle',event=>{
    const detail=event.target;
    if(detail?.matches?.('details[data-team-duplicate-key]'))
@@ -772,18 +803,26 @@ async function exportTeamExcel(withCost=false){
   }
   if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(false);if(act==='exportTeamExcelWithCost')exportTeamExcel(true);
   if(act==='toggleTeamCosts'&&['Super Admin','Admin'].includes(role))window.LISelectionCosts?.toggle?.(filteredTeamRecords(),paint).catch(err=>alert(err.message));
-  if(act==='setCost'&&['Super Admin','Admin'].includes(role)){const target=records.find(x=>x.recordId===b.dataset.recordId);if(target)window.LISelectionCosts?.setForRecord?.(target,paint).catch(err=>alert(err.message))}if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){window.LISelectionCosts?.signOut?.();disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
+  if(act==='setCost'&&['Super Admin','Admin'].includes(role)){const target=records.find(x=>x.recordId===b.dataset.recordId);if(target)window.LISelectionCosts?.setForRecord?.(target,paint).catch(err=>alert(err.message))}if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){window.LISelectionCosts?.signOut?.().catch(err=>console.warn('Supabase logout:',err));disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
  async function publishCentralCatalog(form){if(role!=='Super Admin')return;const d=new FormData(form),brandId=String(d.get('brandId')||''),driveFile=String(d.get('driveFile')||'').trim();if(!confirm('Publish this private Drive catalog to authorized staff?'))return;try{const result=await call('publishCatalog',{brandId,driveFile,confirmUntagged:d.has('confirmUntagged')});await refresh();if(result.brandId===ACTIVE_BRAND_ID)window.LICentralCatalog?.ensureBrand(brandId,true).catch(()=>{});alert(result.itemCount+' products published for '+brandId);paint()}catch(err){alert('Catalog publishing failed: '+err.message)}}
  function init(){
   syncAccessGate();
-  if(!settingsValid())return;
-  // Only the current browser session remembers the short-lived ID credential.
-  // Apps Script verifies it again before returning any private data.
-  const restored=restoreRememberedSession();
-  if(restored)authenticateCurrentToken();
-  loadGsi().then(()=>{initializeGoogleIdentity();showGoogleButton();if(!token)offerReturningGoogleSignIn()})
-   .catch(err=>{console.warn('Google auto sign-in unavailable',err);lastError=err.message;syncAccessGate()});
+  if(!settingsValid()){lastError='Private catalog connection URL is invalid. Contact the Super Admin.';syncAccessGate();return}
+  if(!window.LISupabaseAuth){lastError='Supabase login module missing. Reopen the installed app.';syncAccessGate();return}
+  window.LISupabaseAuth.getClient().then(async api=>{
+    api.auth.onAuthStateChange((event,session)=>{
+      if(event==='TOKEN_REFRESHED'&&session?.access_token&&token){
+        token=session.access_token;
+      }else if(event==='SIGNED_OUT'&&token){disconnect(true)}
+    });
+    const {data:{session}={},error}=await api.auth.getSession();
+    if(error||!session?.access_token)return;
+    try{
+      const account=await window.LISupabaseAuth.verify();
+      await onSupabaseIdentity(account);
+    }catch(error){lastError=String(error?.message||error);status='auth-required';syncAccessGate()}
+  }).catch(error=>{lastError='Supabase connection unavailable: '+error.message;status='error';syncAccessGate()});
 }
  window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),refresh,disconnect,request:call};
 })();
