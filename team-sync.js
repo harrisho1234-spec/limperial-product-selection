@@ -653,7 +653,7 @@ async function exportTeamExcel(withCost=false){
    const differenceLabels=different.map(f=>f.label).join(', ');
    // A shared product code is a family of submissions, not proof of duplicates.
    // Different dimensions, requested sizes, finish or crystal are valid variants.
-   const signature=r=>{const v=teamSelectionSpecification(r),norm=x=>String(x||'').trim().replace(/\\s+/g,' ').toLowerCase();
+   const signature=r=>{const v=teamSelectionSpecification(r),norm=x=>String(x||'').trim().replace(/\s+/g,' ').toLowerCase();
      return [v.original,v.requested,v.finish,v.crystal].map(norm).join('|')};
    const variationCount=new Set(group.records.map(signature)).size;
    const hasVariations=variationCount>1;
