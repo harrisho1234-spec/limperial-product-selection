@@ -651,12 +651,18 @@ async function exportTeamExcel(withCost=false){
    const pending=group.records.filter(r=>!['Approved','Rejected'].includes(r.decision)).length;
    const open=TEAM_DUP_OPEN.has(group.key)?TEAM_DUP_OPEN.get(group.key):different.length>0;
    const differenceLabels=different.map(f=>f.label).join(', ');
+   // A shared product code is a family of submissions, not proof of duplicates.
+   // Different dimensions, requested sizes, finish or crystal are valid variants.
+   const signature=r=>{const v=teamSelectionSpecification(r),norm=x=>String(x||'').trim().replace(/\\s+/g,' ').toLowerCase();
+     return [v.original,v.requested,v.finish,v.crystal].map(norm).join('|')};
+   const variationCount=new Set(group.records.map(signature)).size;
+   const hasVariations=variationCount>1;
    const note=different.length?
-     'Different details: '+esc(differenceLabels):
-     'Same product specifications across these submissions';
+     (hasVariations?'Different sizes/specifications: ':'Details differ: ')+esc(differenceLabels):
+     'Same specifications; review before treating submissions as duplicates';
    const displayValue=v=>v?esc(v):'<span class="team-dup-unspecified">Not specified</span>';
    const compare=different.length?'<div class="team-dup-comparison">'+
-     '<div class="team-dup-comparison-title">Compare the differences before approving</div>'+
+     '<div class="team-dup-comparison-title">Compare product variations before approving (same code does not mean duplicate)</div>'+
      '<div class="team-dup-table-scroll"><table class="team-dup-table"><thead><tr><th>Selected by</th><th>Qty</th>'+
      different.map(f=>'<th>'+esc(f.label)+'</th>').join('')+'</tr></thead><tbody>'+
      group.records.map(r=>{
@@ -668,7 +674,7 @@ async function exportTeamExcel(withCost=false){
    return '<details class="team-duplicate-group" data-team-duplicate-key="'+esc(group.key)+'"'+(open?' open':'')+'>'+
      '<summary class="team-duplicate-summary"><div class="team-duplicate-photo">'+img+'</div>'+
      '<span class="team-duplicate-title"><b>'+esc(brand)+' · '+esc(group.code)+'</b>'+
-     '<span>'+group.records.length+' team submissions · '+pending+' awaiting review</span>'+
+     '<span>'+(hasVariations?variationCount+' product variations':group.records.length+' team submissions')+' · '+pending+' awaiting review</span>'+
      '<span class="'+(different.length?'team-dup-different':'team-dup-identical')+'">'+note+'</span></span>'+
      '<span class="team-duplicate-expand">'+(open?'Review entries':'Open entries')+'</span></summary>'+
      '<div class="team-duplicate-body">'+compare+
