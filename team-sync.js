@@ -13,6 +13,15 @@
  const versions=new Map();let gsiLoaded=false,gsiClient='',callbacks=null,interval=null,oneTapOffered=false,credentialInFlight=false,reconnectTimer=null,reconnectAttempts=0;
  const esc=s=>String(s??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');
  function self(){return {email,role,name:displayName}}
+ // Display the exact staff name configured in User & Access, not the login email.
+ // ownerEmail remains the immutable identity for approvals, sync and audit history.
+ function teamOwnerName(record){
+  const address=String(record?.ownerEmail||'').trim().toLowerCase();
+  const directoryUser=users.find(u=>String(u.email||'').trim().toLowerCase()===address);
+  const assigned=String(record?.ownerName||record?.ownerDisplayName||directoryUser?.name||
+    (address===String(email||'').trim().toLowerCase()?displayName:'')||'').trim();
+  return assigned&&assigned.toLowerCase()!==address?assigned:'Name not set';
+ }
  function hasRole(){return ['Super Admin','Admin','Manager'].includes(role)}
  function normalizeConfigValue(value){return String(value??'').replace(/[\s\u200B-\u200D\uFEFF]+/g,'')}
  function settingsValid(){return normalizeConfigValue(config.scriptUrl)===DEFAULT_CONFIG.scriptUrl}
@@ -667,7 +676,7 @@ async function exportTeamExcel(withCost=false){
      different.map(f=>'<th>'+esc(f.label)+'</th>').join('')+'</tr></thead><tbody>'+
      group.records.map(r=>{
        const spec=teamSelectionSpecification(r);
-       return '<tr><td>'+esc(r.ownerEmail||'—')+'</td><td>'+esc(r.qty??r.entry?.qty??'—')+'</td>'+
+       return '<tr><td>'+esc(teamOwnerName(r))+'</td><td>'+esc(r.qty??r.entry?.qty??'—')+'</td>'+
         different.map(f=>'<td>'+displayValue(spec[f.key])+'</td>').join('')+'</tr>';
      }).join('')+'</tbody></table></div></div>':
      '<p class="team-dup-same">No differences in product or requested specifications. Staff quantities and approvals remain separate.</p>';
@@ -704,7 +713,7 @@ async function exportTeamExcel(withCost=false){
    const decision=String(r.decision||'Review');
    const status=String(r.supplierStatus||'Not requested');
    const recordName=String(r.name||r.item?.name||'Product');
-   const owner=String(r.ownerEmail||'—');
+   const owner=teamOwnerName(r);
    const spec=teamSelectionSpecification(r);
    const showSpec=(name,val)=>val?'<div class="team-list-request-line"><b>'+name+':</b> '+esc(val)+'</div>':'';
    const specInfo=showSpec('Requested size',spec.requested)+showSpec('Finish',spec.finish)+
