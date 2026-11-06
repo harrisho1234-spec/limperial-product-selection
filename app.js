@@ -252,111 +252,9 @@ function splitPageTools(i){
   return `<div class="candidate-row"><h3>Individual designs on this page</h3><p class="tiny">${q(current)}. Split or adjust the layout when the catalog page shows several products. Each resulting design can be selected independently.</p><div class="split-layout-tools">${options.map(([value,label])=>`<button type="button" class="btn ${original.splitLayout===value||(!original.splitParent&&value==='none')?'':'quiet'} small" data-action="splitPage" data-id="${q(parentId)}" data-layout="${value}">${label}</button>`).join('')}</div><p class="tiny">The exact supplier codes and dimensions are not verified from image-only pages. Your existing selections are never deleted automatically.</p></div>`;
 }
 
-function tlSetPickerCrop(value){
- if(MODAL?.type!=='tl-pick')return;
- const rect=validTLCrop(value);
- if(!rect)return;
- MODAL.crop=rect.map(n=>Math.round(n*10000)/10000);
- const box=$('tlCropBox');
- if(box){
-  const [x,y,w,h]=MODAL.crop;
-  Object.assign(box.style,{left:x*100+'%',top:y*100+'%',width:w*100+'%',height:h*100+'%'});
- }
- const item=PACK?.items?.find(x=>x.id===MODAL.id);
- const preview=$('tlCropPreview');
- if(preview&&item?.sprite)preview.innerHTML=sprite({...item.sprite,cropRect:MODAL.crop});
-}
-const TL_CROP_PRESETS={
- full:[0,0,1,1],left:[0,0,0.5,1],right:[0.5,0,0.5,1],
- upper:[0,0,1,0.5],lower:[0,0.5,1,0.5],
- lefttop:[0,0,0.5,0.5],righttop:[0.5,0,0.5,0.5],
- leftbottom:[0,0.5,0.5,0.5],rightbottom:[0.5,0.5,0.5,0.5]
-};
-function tlPickDrawer(id){
- if(ACTIVE_BRAND_ID!=='tl')return;
- const item=PACK?.items?.find(x=>x.id===id);
- if(!item||item.source!=='tl-chandelier')return toast('Open a Tong Luo catalog page');
- MODAL={type:'tl-pick',id,crop:[0.05,0.05,0.9,0.9]};
- const recognized=Array.isArray(item.modelCandidates)?item.modelCandidates:[];
- const modelOptions=recognized.map((m,i)=>'<option value="'+i+'">'+q(m.code)+(m.dimension?' · '+q(m.dimension):'')+'</option>').join('');
- const presets=[
- ['full','Full'],['left','Left'],['right','Right'],['upper','Top'],['lower','Bottom'],
- ['lefttop','Upper left'],['righttop','Upper right'],['leftbottom','Lower left'],['rightbottom','Lower right']
- ].map(([key,label])=>'<button type="button" class="btn quiet small" data-action="tlCropPreset" data-preset="'+key+'">'+label+'</button>').join('');
- $('drawerContent').innerHTML=
- '<div class="drawer-header"><div><div class="tiny">TL · TONG LUO · PDF PAGE '+q(item.page)+'</div><h2>Pick one chandelier from this page</h2></div><button class="close" data-action="close">×</button></div>'+
- '<div class="drawer-body"><p class="tiny">Draw a rectangle around only the product you want. Enter its exact supplier Model code from the printed label if readable. The original catalog remains unchanged.</p>'+
- '<div class="tl-picker-grid"><div><div class="tl-picker-label">Original page · draw a box around one chandelier</div>'+
- '<div id="tlPickCanvas" class="tl-pick-canvas">'+sprite(item.sprite)+'<div id="tlCropBox" class="tl-pick-box"></div></div>'+
- '<div class="tl-picker-presets">'+presets+'</div></div><div><div class="tl-picker-label">Cropped individual product photo</div>'+
- '<div id="tlCropPreview" class="tl-pick-preview"></div>'+
- '<form id="tlPickForm"><div class="variant-fields">'+
- (recognized.length?'<div class="field span2"><label>Models recognized on this printed page</label><select id="tlModelChoice" name="modelChoice"><option value="">Choose printed model (verify against photo)</option>'+modelOptions+'</select><p class="tiny">Imported from selectable PDF text; OCR mistakes are possible. Selecting fills the editable fields below.</p></div>':'')+
- '<div class="field span2"><label>Supplier model code</label><input name="code" maxlength="120" autocomplete="off" placeholder="e.g. TD-1935-8"></div>'+
- '<div class="field span2"><label>Product description</label><input name="name" maxlength="220" placeholder="e.g. Gold crystal chandelier"></div>'+
- '<div class="field span2"><label>Original size (as printed)</label><input name="dimension" maxlength="150" placeholder="e.g. Ø730 × H970 mm"></div>'+
- '<div class="field span2"><label>Other request / notes</label><input name="request" maxlength="900" placeholder="Finish, crystal, modifications…"></div>'+
- '</div><p class="tiny">If the code is unreadable, leave it blank. The selection will be flagged for verification and cannot enter a final order until a supplier code is entered.</p>'+
- '<div class="row-actions"><button class="btn" type="submit">Save one product · Qty 1</button>'+
- '<button class="btn quiet" type="button" data-action="close">Cancel</button></div></form></div></div></div>';
- showDrawer();
- tlSetPickerCrop(MODAL.crop);
- const canvas=$('tlPickCanvas');
- if(!canvas)return;
- let start=null;
- const pos=e=>{
-  const r=canvas.getBoundingClientRect();
-  return [Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)),Math.max(0,Math.min(1,(e.clientY-r.top)/r.height))];
- };
- canvas.addEventListener('pointerdown',e=>{
-  if(e.pointerType==='mouse'&&e.button!==0)return;
-  e.preventDefault();start=pos(e);
-  try{canvas.setPointerCapture(e.pointerId)}catch(_){}
- });
- canvas.addEventListener('pointermove',e=>{
-  if(!start||MODAL?.type!=='tl-pick')return;
-  const p=pos(e),x=Math.min(p[0],start[0]),y=Math.min(p[1],start[1]);
-  const box=$('tlCropBox');
-  if(box)Object.assign(box.style,{left:x*100+'%',top:y*100+'%',width:Math.abs(p[0]-start[0])*100+'%',height:Math.abs(p[1]-start[1])*100+'%'});
- });
- canvas.addEventListener('pointerup',e=>{
-  if(!start||MODAL?.type!=='tl-pick')return;
-  const p=pos(e),rect=[Math.min(start[0],p[0]),Math.min(start[1],p[1]),Math.abs(p[0]-start[0]),Math.abs(p[1]-start[1])];
-  start=null;
-  if(rect[2]>=0.06&&rect[3]>=0.06)tlSetPickerCrop(rect);
-  else tlSetPickerCrop(MODAL.crop);
- });
- canvas.addEventListener('pointercancel',()=>{start=null;tlSetPickerCrop(MODAL.crop)});
-}
-function tlSavePickedProduct(form){
- if(MODAL?.type!=='tl-pick'||ACTIVE_BRAND_ID!=='tl')return;
- const source=PACK.items.find(x=>x.id===MODAL.id);
- const rect=validTLCrop(MODAL.crop);
- if(!source||!rect)return alert('Choose the product photo before saving.');
- const d=new FormData(form);
- const code=String(d.get('code')||'').trim().slice(0,120);
- const name=String(d.get('name')||'').trim().slice(0,220)||
-   (code?'Tong Luo chandelier · '+code:'Tong Luo chandelier · code to verify');
- const dimension=String(d.get('dimension')||'').trim().slice(0,150);
- const request=String(d.get('request')||'').trim().slice(0,900);
- if(!code&&!confirm('Save without a model code? You must verify it before final ordering.'))return;
- let id;
- do{id='tl-model-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8)}
- while(S.catalogDuplicates?.[id]||PACK.items.some(i=>i.id===id));
- if(!S.catalogDuplicates)S.catalogDuplicates={};
- S.catalogDuplicates[id]={
-  sourceItemId:source.id,tlCrop:rect,tlName:name,tlOriginalSize:dimension,
-  code,decision:'Select',supplierStatus:'Not requested',qty:1,targetSize:'',request,crystal:'',finish:''
- };
- save();
- window.LITeamSync?.itemChanged('catalog',id);
- closeDrawer();setView('selected');
- toast('Saved one TL product with its own photo');
-}
-
-function itemDrawer(id){const i=catalogItemForSelection(id);if(!i)return;MODAL={type:'item',id};const s=candidateEntry(i),src=PACK.sources[i.source],previous=(PACK.history||[]).filter(x=>x.code===i.code);$('drawerContent').innerHTML=`<div class="drawer-header"><div><div class="tiny">${q(src?.name||'Manual product')} ${i.page?'· PDF page '+q(i.page):''}</div><h2>${q(i.code||'Visual catalog reference')}</h2></div><button class="close" data-action="close">×</button></div><div class="drawer-body"><div class="product-hero">${photo(i.sprite)}<div><p><b>${q(i.name)}</b></p><p class="muted">${q(i.dimension||'Dimensions: supplier verification needed')}</p><p><span class="pill ${i.code?'green':'warn'}">${q(i.verification)}</span></p>${previous.length?'<p class="pill warn">Previously ordered — check stock before reordering</p>':''}<p>${sourceLink(src||{})}${i.page?' · Page '+q(i.page):''}</p>${ACTIVE_BRAND_ID==='asfour'?'':`<div class="row-actions"><label class="btn secondary small">${i.sprite?'Change product photo':'＋ Add product photo'}<input type="file" data-action="productPhoto" data-id="${q(i.id)}" accept="image/png,image/jpeg,image/webp" style="display:none"></label></div>`}</div></div><div class="alert">${i.photoKind==='user-photo'?'Image uploaded for this brand; verify the supplier code and requested finish.':i.photoKind==='supplier-photo'?'Photo cropped from the supplier-code row; crystal and finish variants may share the same reference picture.':i.photoKind==='catalog-crop'?'This is one visual design cropped from a multi-product catalog page. Confirm its exact supplier code, finish and size with the supplier.':'No individually verified product photo. Add one manually or check the original catalog.'}</div>${i.splitGenerated?'<h3>Original catalog page</h3>'+photo(i.pageSprite,'preview')+'<p class="tiny">The full page is retained here to verify the source and product references.</p>':''}${ACTIVE_BRAND_ID==='tl'&&i.source==='tl-chandelier'&&!i.isSelectionCopy?'<div class="candidate-row"><b>Choose one chandelier, not this whole catalog page.</b><p class="tiny">A printed page may show several different models. Draw around one product and enter the supplier code before sharing it.</p></div>':splitPageTools(i)}
- ${ACTIVE_BRAND_ID==='tl'&&i.source==='tl-chandelier'&&!i.isSelectionCopy?'': '<h3>Prepare this candidate</h3>'+candidateCard(i)}
- <div class="row-actions"><button class="btn secondary" data-action="${ACTIVE_BRAND_ID==='tl'&&i.source==='tl-chandelier'&&!i.isSelectionCopy?'tlPick':'shortlist'}" data-id="${q(i.id)}">${ACTIVE_BRAND_ID==='tl'&&i.source==='tl-chandelier'&&!i.isSelectionCopy?'Pick one product':selectionForItem(i.id)?'Already selected':'＋ Add to selections'}</button><button class="btn quiet" data-action="close">Close</button></div></div>`;showDrawer()}
+function itemDrawer(id){const i=catalogItemForSelection(id);if(!i)return;MODAL={type:'item',id};const s=candidateEntry(i),src=PACK.sources[i.source],tlPage=ACTIVE_BRAND_ID==='tl'&&!!i.tlPageReference,previous=(PACK.history||[]).filter(x=>x.code===i.code);$('drawerContent').innerHTML=`<div class="drawer-header"><div><div class="tiny">${q(src?.name||'Manual product')} ${i.page?'· PDF page '+q(i.page):''}</div><h2>${q(i.code||'Visual catalog reference')}</h2></div><button class="close" data-action="close">×</button></div><div class="drawer-body"><div class="product-hero">${photo(i.sprite)}<div><p><b>${q(i.name)}</b></p><p class="muted">${q(i.dimension||'Dimensions: supplier verification needed')}</p><p><span class="pill ${i.code?'green':'warn'}">${q(i.verification)}</span></p>${previous.length?'<p class="pill warn">Previously ordered — check stock before reordering</p>':''}<p>${sourceLink(src||{})}${i.page?' · Page '+q(i.page):''}</p>${ACTIVE_BRAND_ID==='asfour'?'':`<div class="row-actions"><label class="btn secondary small">${i.sprite?'Change product photo':'＋ Add product photo'}<input type="file" data-action="productPhoto" data-id="${q(i.id)}" accept="image/png,image/jpeg,image/webp" style="display:none"></label></div>`}</div></div><div class="alert">${i.photoKind==='user-photo'?'Image uploaded for this brand; verify the supplier code and requested finish.':i.photoKind==='supplier-photo'?'Photo cropped from the supplier-code row; crystal and finish variants may share the same reference picture.':i.photoKind==='catalog-crop'?'This is one visual design cropped from a multi-product catalog page. Confirm its exact supplier code, finish and size with the supplier.':'No individually verified product photo. Add one manually or check the original catalog.'}</div>${i.splitGenerated?'<h3>Original catalog page</h3>'+photo(i.pageSprite,'preview')+'<p class="tiny">The full page is retained here to verify the source and product references.</p>':''}${tlPage?'<p class="tiny">Original catalog page for visual reference. Open Individual products in Discover to select a specific model.</p>':splitPageTools(i)}
+ ${tlPage?'':'<h3>Prepare this candidate</h3>'+candidateCard(i)}
+ <div class="row-actions">${tlPage?'':`<button class="btn secondary" data-action="shortlist" data-id="${q(i.id)}">${selectionForItem(i.id)?'Already selected':'＋ Add to selections'}</button>`}<button class="btn quiet" data-action="close">Close</button></div></div>`;showDrawer()}
 function customDrawer(id){const f=PACK.family.find(x=>x.id===id);MODAL={type:'custom',id};$('drawerContent').innerHTML=`<div class="drawer-header"><h2>New custom version · ${q(id)}</h2><button class="close" data-action="close">×</button></div><div class="drawer-body"><p class="muted">This creates a proposed version under ${q(f?.mainCode||id)}. It is <b>not</b> confirmed by ${q(brandNow().name)}.</p><form id="newCustomForm"><div class="variant-fields"><div class="field span2"><label>Version type</label><select name="type" required><option>XL chandelier</option><option>Large chandelier</option><option>Medium chandelier</option><option>Linear chandelier</option><option>Wall lamp</option><option>Floor lamp</option><option>Table lamp</option><option>Other</option></select></div><div class="field"><label>Requested size</label><input name="size" required placeholder="L150 × W40 × H80 cm"></div><div class="field"><label>Original reference code</label><input name="code" value="${q(f?.mainCode||'')}" placeholder="Reference, not final code"></div><div class="field span2"><label>Design modifications</label><textarea name="request" placeholder="Matching arms, number of tiers, gold finish, crystal type…" required></textarea></div></div><div class="row-actions"><button class="btn" type="submit">Create custom version</button></div></form></div>`;showDrawer()}
 function compareDrawer(){const a=S.compare.slice(0,2).map(id=>PACK.items.find(x=>x.id===id)).filter(Boolean);if(a.length!==2){toast('Select two catalog candidates to compare');return}MODAL={type:'compare'};$('drawerContent').innerHTML=`<div class="drawer-header"><h2>Compare two designs</h2><button class="close" data-action="close">×</button></div><div class="drawer-body"><div class="compare-grid">${a.map(i=>`<div>${photo(i.sprite)}<p><b>${q(i.code||i.name)}</b></p><p class="tiny">${q(i.dimension||'Size not confirmed')} · ${q(PACK.sources[i.source]?.name||'Supplier catalog')}</p><p>${ACTIVE_BRAND_ID==='asfour'&&i.source==='price'?'<span class="tiny">Supplier reference · original price-list PDF not available in this app</span>':sourceLink(PACK.sources[i.source]||{})}</p></div>`).join('')}</div><div class="alert">Please compare design, room suitability, matching variants and visual similarity. Supplier availability is not implied.</div></div>`;showDrawer()}
 function showDrawer(){$('overlay').classList.remove('hidden');document.body.style.overflow='hidden'}function closeDrawer(){$('overlay').classList.add('hidden');document.body.style.overflow='';MODAL=null}
@@ -618,25 +516,14 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
   keepViewport();
   requestAnimationFrame(keepViewport);
   break;
-}case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'tlPick':tlPickDrawer(id);break;case 'tlCropPreset':if(MODAL?.type==='tl-pick')tlSetPickerCrop(TL_CROP_PRESETS[b.dataset.preset]);break;case 'item':itemDrawer(id);break;case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{if(ACTIVE_BRAND_ID==='tl'&&PACK?.items?.some(x=>x.id===id&&x.source==='tl-chandelier')){tlPickDrawer(id);break}if(!selectionForItem(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}S.catalog[id]={...candidateEntry(item),decision:'Select',qty:1};if(!S.shortlist.includes(id))S.shortlist.push(id)}else{toast('Already in My selections');break}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportFamilies':await exportFamiliesExcel(false);break;case 'exportFamiliesWithCost':await exportFamiliesExcel(true);break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
-document.addEventListener('change',async e=>{if(!window.LITeamSync?.status()?.connected)return;const t=e.target;if(t.id==='tlModelChoice'&&MODAL?.type==='tl-pick'){
-  const source=PACK?.items?.find(i=>i.id===MODAL.id);
-  const idx=t.value===''?-1:Number(t.value);
-  const m=Number.isInteger(idx)?source?.modelCandidates?.[idx]:null;
-  const form=$('tlPickForm');
-  if(form&&m){
-    form.elements.code.value=m.code||'';
-    form.elements.dimension.value=m.dimension||'';
-    if(!form.elements.name.value.trim())form.elements.name.value='Tong Luo chandelier';
-  }
-  return;
- }if(t.id==='packFile'&&t.files[0]){await importCatalog(t.files[0]);t.value='';return}if(t.id==='restoreFile'&&t.files[0]){await restore(t.files[0]);t.value='';return}if(t.id==='brandCatalogFiles'&&t.files.length){await uploadBrandFiles(t.files);t.value='';return}if(t.dataset.action==='productPhoto'&&t.files[0]){try{await updateManualProductPhoto(t.dataset.id,t.files[0])}catch(err){alert('Photo upload failed: '+err.message)}t.value='';return}if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={};if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}const entry=S[collection][t.dataset.id];
+}case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'item':itemDrawer(id);break;case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{if(ACTIVE_BRAND_ID==='tl'&&PACK?.items?.some(x=>x.id===id&&x.tlPageReference)){toast('Original pages are references. Select an individual model in Discover.');break}if(!selectionForItem(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}S.catalog[id]={...candidateEntry(item),decision:'Select',qty:1};if(!S.shortlist.includes(id))S.shortlist.push(id)}else{toast('Already in My selections');break}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportFamilies':await exportFamiliesExcel(false);break;case 'exportFamiliesWithCost':await exportFamiliesExcel(true);break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
+document.addEventListener('change',async e=>{if(!window.LITeamSync?.status()?.connected)return;const t=e.target;if(t.id==='packFile'&&t.files[0]){await importCatalog(t.files[0]);t.value='';return}if(t.id==='restoreFile'&&t.files[0]){await restore(t.files[0]);t.value='';return}if(t.id==='brandCatalogFiles'&&t.files.length){await uploadBrandFiles(t.files);t.value='';return}if(t.dataset.action==='productPhoto'&&t.files[0]){try{await updateManualProductPhoto(t.dataset.id,t.files[0])}catch(err){alert('Photo upload failed: '+err.message)}t.value='';return}if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.id==='tlCatalogView'){TL_CATALOG_VIEW=t.value==='pages'?'pages':'products';KIND='all';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={};if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}const entry=S[collection][t.dataset.id];
 if(t.dataset.key==='decision'&&['Select','Approved'].includes(t.value)&&
   !['Select','Approved'].includes(entry.decision||'Review')&&
   !(Number(entry.qty)>0))entry.qty=1;
 entry[t.dataset.key]=t.dataset.key==='qty'?Math.max(0,Number(t.value)||0):t.value;save();window.LITeamSync?.itemChanged(collection==='catalog'?'catalog':'variant',t.dataset.id);if(VIEW==='order')renderOrder();return}});
 document.addEventListener('input',e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='catalogSearch'){SEARCH=e.target.value;LIMIT=48;const start=e.target.selectionStart;renderDiscover();$('catalogSearch').focus();$('catalogSearch').setSelectionRange(start,start)}if(e.target.id==='familySearch'){SEARCH=e.target.value;renderFamilies();$('familySearch').focus()}});
-document.addEventListener('submit',async e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='tlPickForm'){e.preventDefault();tlSavePickedProduct(e.target);return}if(e.target.id==='addBrandForm'){e.preventDefault();try{await addNewBrand(e.target)}catch(err){alert('Unable to add brand: '+err.message)}return}if(e.target.id==='newBrandProductForm'){e.preventDefault();try{await addManualProduct(e.target)}catch(err){alert('Unable to add product: '+err.message)}return}if(e.target.id==='newFamilyForm'){e.preventDefault();try{await createFamily(e.target)}catch(err){alert('Unable to create family: '+err.message)}return}if(e.target.id==='newCustomForm'){e.preventDefault();let d=new FormData(e.target),fid=MODAL?.id;if(!fid)return;const family=PACK.family.find(f=>f.id===fid);let id='CUSTOM-'+Date.now().toString(36);let v={id,familyId:fid,type:String(d.get('type')),code:String(d.get('code')),targetSize:String(d.get('size')),request:String(d.get('request')),finish:'',crystal:'',spec:'',sourceRef:'User proposed size',referenceKind:'CUSTOM DESIGN — not a supplier standard',isCustomProposal:true,supplierStatus:'Not requested',decision:'Review',qty:0,sprite:family.sprite};S.manual.push(v);save();toast('Custom version added; supplier confirmation required');familyDrawer(fid)}});
+document.addEventListener('submit',async e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='addBrandForm'){e.preventDefault();try{await addNewBrand(e.target)}catch(err){alert('Unable to add brand: '+err.message)}return}if(e.target.id==='newBrandProductForm'){e.preventDefault();try{await addManualProduct(e.target)}catch(err){alert('Unable to add product: '+err.message)}return}if(e.target.id==='newFamilyForm'){e.preventDefault();try{await createFamily(e.target)}catch(err){alert('Unable to create family: '+err.message)}return}if(e.target.id==='newCustomForm'){e.preventDefault();let d=new FormData(e.target),fid=MODAL?.id;if(!fid)return;const family=PACK.family.find(f=>f.id===fid);let id='CUSTOM-'+Date.now().toString(36);let v={id,familyId:fid,type:String(d.get('type')),code:String(d.get('code')),targetSize:String(d.get('size')),request:String(d.get('request')),finish:'',crystal:'',spec:'',sourceRef:'User proposed size',referenceKind:'CUSTOM DESIGN — not a supplier standard',isCustomProposal:true,supplierStatus:'Not requested',decision:'Review',qty:0,sprite:family.sprite};S.manual.push(v);save();toast('Custom version added; supplier confirmation required');familyDrawer(fid)}});
 window.LIAppAuthorized=()=>{if(VIEW==='team')VIEW='brands';render()};
 $('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))closeDrawer()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});$('backupTop').addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)backup()});document.querySelectorAll('#nav button').forEach(x=>x.addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)setView(x.dataset.view)}));
 (async()=>{try{DB=await openDB();const data=await tx(brandKey(ACTIVE_BRAND_ID),null,'readonly');if(data&&window.LITeamSync?.status()?.connected&&!window.LICentralCatalog?.isLocked(data))usePack(data);if(!window.LITeamSync?.status()?.connected)VIEW='team'}catch(e){console.warn('IndexedDB storage unavailable',e);VIEW='team'}window.LITeamSync?.init();render();if('serviceWorker'in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{})})();
