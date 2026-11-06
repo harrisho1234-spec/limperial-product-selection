@@ -440,9 +440,11 @@ let teamCostView='without',teamCostLookup=new Map();
   if(!['Super Admin','Admin'].includes(role)||!window.LISelectionCosts?.authorized())return alert('Supplier cost access denied.');
   const rec=records.find(r=>r.recordId===recordId&&!r.deleted);if(!rec)return;
   const old=window.LISelectionCosts.costFor(rec,teamCostLookup);
-  const amount=prompt('Supplier unit cost in USD for '+(rec.code||rec.itemId),old?.unit_cost??'');
+  const amount=prompt('Supplier unit cost for '+(rec.code||rec.itemId),old?.unit_cost??'');
   if(amount===null)return;
-  try{await window.LISelectionCosts.save(rec,amount,'USD');await loadTeamCosts();paint()}catch(e){alert(e.message)}
+  const currency=prompt('Currency (three-letter code)',old?.currency||'USD');
+  if(currency===null)return;
+  try{await window.LISelectionCosts.save(rec,amount,currency);await loadTeamCosts();paint()}catch(e){alert(e.message)}
  }
  let exportingTeamExcel=false;
 async function exportTeamExcel(mode='without'){
