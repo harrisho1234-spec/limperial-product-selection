@@ -1,7 +1,7 @@
-/* L'Imperial Product Selection: protected supplier-cost access (pilot).
-   Catalog/Team access continues through the existing Apps Script bridge until
-   the server is explicitly upgraded to verify Supabase identities.
-   Only publishable browser credentials are included here. RLS is the authority. */
+/* L'Imperial Product Selection: Supabase staff authentication & confidential costs.
+   Supabase RLS verifies membership and prevents non-Admin cost retrieval.
+   The private Google Apps Script bridge accepts verified Supabase access tokens.
+   Public browser configuration contains a publishable key only, never secrets. */
 (function(){
  'use strict';
  const PROJECT_URL='https://msxvnaintafqdgheutfu.supabase.co';
@@ -9,8 +9,8 @@
  const MEMBERS='product_selection_members';
  const COSTS='product_selection_supplier_costs';
  const ADMIN_ROLES=['Admin','Super Admin'];
- // Load Supabase only when Admin opens cost access; never delay normal Staff login.
- const COST_AUTH_STORAGE='li-product-selection-cost-session';
+ // One session for staff login and Admin cost access; isolated per browser session.
+ const COST_AUTH_STORAGE='li-product-selection-supabase-session-v1';
  let client=null,sdkLoading=null;
  async function ensureClient(){
   if(client)return client;
@@ -33,6 +33,31 @@
   return client;
  }
  let visible=false,known=new Map(),lastIdentity=null,loginOpen=false;
+ async function verifiedAccount(){
+  const api=await ensureClient();
+  const {data:{user}={},error}=await api.auth.getUser();
+  if(error||!user?.id||!user.email)throw Error('Please sign in with your Supabase staff account.');
+  const {data:member,error:memberError}=await api.from(MEMBERS)
+   .select('user_id,role,active,display_name').eq('user_id',user.id).maybeSingle();
+  if(memberError)throw Error('Could not verify your Product Selection access.');
+  if(!member?.active||!['Super Admin','Admin','Manager','Staff'].includes(member.role))
+   throw Error('Your Supabase account is not approved for Product Selection.');
+  const {data:{session}={},error:sessionError}=await api.auth.getSession();
+  if(sessionError||!session?.access_token)throw Error('Your Supabase session expired. Please sign in again.');
+  return {id:user.id,email:String(user.email).trim().toLowerCase(),role:member.role,
+    name:member.display_name||user.email,accessToken:session.access_token,
+    expiresAt:session.expires_at?session.expires_at*1000:0};
+ }
+ async function signInAccount(email,password){
+  const api=await ensureClient();
+  const res=await api.auth.signInWithPassword({email:String(email||'').trim().toLowerCase(),password});
+  if(res.error)throw Error('Unable to sign in. Check your Supabase staff email and password.');
+  try{return await verifiedAccount()}
+  catch(error){await api.auth.signOut().catch(()=>{});throw error}
+ }
+ window.LISupabaseAuth={getClient:ensureClient,verify:verifiedAccount,signIn:signInAccount,
+  signOut:async()=>{const api=await ensureClient();await api.auth.signOut()}};
+
 
  function googleRole(){return window.LITeamSync?.getRoles?.()||{}}
  function isExistingAdmin(){return ADMIN_ROLES.includes(googleRole().role)&&!!window.LITeamSync?.status?.().connected}
@@ -61,19 +86,13 @@
   return 'sha256:'+Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join('');
  }
  async function identity(){
-  const api=await ensureClient();
-  const {data:{user}={},error}=await api.auth.getUser();
-  if(error)throw Error('Supabase session expired. Please sign in again.');
-  if(!user)return null;
-  const {data:member,error:memberError}=await client.from(MEMBERS)
-   .select('user_id,role,active').eq('user_id',user.id).maybeSingle();
-  if(memberError)throw Error('Supabase membership could not be verified.');
-  const google=googleRole();
-  if(!member?.active||!ADMIN_ROLES.includes(member.role))throw Error('This Supabase account has no permission to view supplier costs.');
-  if(!isExistingAdmin())throw Error('Management access to Product Selection is required.');
-  if(String(user.email||'').trim().toLowerCase()!==String(google.email||'').trim().toLowerCase())
-   throw Error('Your Supabase and Product Selection email addresses must match.');
-  lastIdentity={id:user.id,email:user.email,role:member.role};
+  const verified=await verifiedAccount();
+  if(!ADMIN_ROLES.includes(verified.role))throw Error('Only Admin and Super Admin can see supplier costs.');
+  if(!isExistingAdmin())throw Error('Admin Product Selection access is required.');
+  const role=googleRole();
+  if(verified.email!==String(role.email||'').trim().toLowerCase()||verified.role!==role.role)
+   throw Error('Your authorized Product Selection session must match Supabase.');
+  lastIdentity={id:verified.id,email:verified.email,role:verified.role};
   return lastIdentity;
  }
  function gate(){
@@ -110,7 +129,6 @@
   }catch(err){
    console.warn('Cost session verification required:',err.message);
   }
-  showLogin();
   return false;
  }
  function format(amount,currency='USD'){
@@ -186,8 +204,7 @@
    await ensureClient();
    const data=new FormData(form),email=String(data.get('email')||'').trim(),password=String(data.get('password')||'');
    if(email.toLowerCase()!==String(googleRole().email||'').toLowerCase())throw Error('Use the same email shown in Product Selection.');
-   const {error}=await client.auth.signInWithPassword({email,password});
-   if(error)throw Error('Unable to sign in. Check your existing Supabase credentials.');
+   await signInAccount(email,password);
    await identity();hideLogin();
    alert('Admin cost access verified. Choose With Cost again to export or Show Costs to review.');
   }catch(error){err.textContent=error.message;err.hidden=false}
