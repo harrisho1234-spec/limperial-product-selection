@@ -155,7 +155,7 @@ function filteredCatalogItems(){return PACK.items.filter(x=>!x.splitParent&&
    (ASFOUR_REFERENCE_FILTER==='information'?isAsfourInformationPage(x):!isAsfourInformationPage(x)))&&
  (SRC==='all'||x.source===SRC)&&
  (KIND==='all'||(KIND==='coded'?!!x.code:!x.code))&&
- (!SEARCH||`${x.code} ${x.name} ${x.dimension}`.toLowerCase().includes(SEARCH.toLowerCase())))}
+ (!SEARCH||`${x.code} ${x.name} ${x.dimension} ${x.modelSearch||''}`.toLowerCase().includes(SEARCH.toLowerCase())))}
 function renderDiscover(){
  if(ACTIVE_BRAND_ID!=='asfour'&&!PACK.items.length){$('app').innerHTML=renderBrandEmpty();return}
  const sourceOptions=`<option value="all">All catalogs</option>${Object.entries(PACK.sources).map(([id,a])=>`<option value="${q(id)}" ${SRC===id?'selected':''}>${q(a.name)}</option>`).join('')}`;
@@ -167,7 +167,7 @@ function renderDiscover(){
   </select>`:'';
  const note=ACTIVE_BRAND_ID==='asfour'?
    `${informationCount} confirmed editorial pages separated; all original records and selections are preserved.`:
-   ACTIVE_BRAND_ID==='tl'?'Tong Luo · Open Pick product, crop one chandelier, then enter the printed model code. Original pages remain unchanged.':
+   ACTIVE_BRAND_ID==='tl'?'Tong Luo · Model codes from the searchable PDF can now be searched. Pick one chandelier, verify its printed code, and crop its photo.':
    'Scanned catalogs may contain visual references needing supplier verification';
  const items=filteredCatalogItems(),visible=items.slice(0,LIMIT);
  $('app').innerHTML=`${pricePhotoNotice()}<div class="toolbar"><div class="search">
@@ -184,10 +184,12 @@ function catalogCard(i){
  const tlPage=ACTIVE_BRAND_ID==='tl'&&i.source==='tl-chandelier'&&!i.splitGenerated;
  const editorial=isAsfourInformationPage(i);
  const label=tlPage?'Choose a model':editorial?'Catalog information':i.photoKind==='supplier-photo'?'Product photo':i.photoKind==='catalog-crop'?'Individual design':i.code?'Product · PDF preview':'Catalog page';
- const description=tlPage?'Multi-design catalog page · pick one chandelier':editorial?'Editorial/reference page — not a coded product':(i.code?(i.name||'Chandelier'):'Visual reference only');
+ const count=tlPage&&Array.isArray(i.modelCandidates)?i.modelCandidates.length:0;
+ const description=tlPage?(count?count+' model labels found in searchable PDF · pick one chandelier':'Multi-design catalog page · code needs verification'):editorial?'Editorial/reference page — not a coded product':(i.code?(i.name||'Chandelier'):'Visual reference only');
  return `<article class="card"><div class="card-photo">${sprite(i.sprite)}<span class="float-tag">${q(label)}</span></div>
  <div class="card-info"><div class="card-name">${q(i.code||i.name)}</div>
  <div class="card-meta">${q(description)}</div>
+ ${tlPage&&i.modelCandidates?.length?`<div class="card-meta" title="OCR text — verify against photo">${q(i.modelCandidates.slice(0,3).map(m=>m.code).join(' · '))}${i.modelCandidates.length>3?' · …':''}</div>`:''}
  ${String(i.dimension||'').trim()?`<div class="card-size" title="Original catalog size"><span class="card-size-label">Size</span> ${q(i.dimension)}</div>`:''}
  <div class="card-meta">${q(PACK.sources[i.source]?.name||'Supplier catalog')} · p.${i.page}</div>
  ${i.photoKind==='supplier-photo'&&i.imageSharedWithVariants?'<div class="card-meta">Reference photo; finish may vary</div>':''}</div>
@@ -266,6 +268,8 @@ function tlPickDrawer(id){
  const item=PACK?.items?.find(x=>x.id===id);
  if(!item||item.source!=='tl-chandelier')return toast('Open a Tong Luo catalog page');
  MODAL={type:'tl-pick',id,crop:[0.05,0.05,0.9,0.9]};
+ const recognized=Array.isArray(item.modelCandidates)?item.modelCandidates:[];
+ const modelOptions=recognized.map((m,i)=>'<option value="'+i+'">'+q(m.code)+(m.dimension?' · '+q(m.dimension):'')+'</option>').join('');
  const presets=[
  ['full','Full'],['left','Left'],['right','Right'],['upper','Top'],['lower','Bottom'],
  ['lefttop','Upper left'],['righttop','Upper right'],['leftbottom','Lower left'],['rightbottom','Lower right']
@@ -278,6 +282,7 @@ function tlPickDrawer(id){
  '<div class="tl-picker-presets">'+presets+'</div></div><div><div class="tl-picker-label">Cropped individual product photo</div>'+
  '<div id="tlCropPreview" class="tl-pick-preview"></div>'+
  '<form id="tlPickForm"><div class="variant-fields">'+
+ (recognized.length?'<div class="field span2"><label>Models recognized on this printed page</label><select id="tlModelChoice" name="modelChoice"><option value="">Choose printed model (verify against photo)</option>'+modelOptions+'</select><p class="tiny">Imported from selectable PDF text; OCR mistakes are possible. Selecting fills the editable fields below.</p></div>':'')+
  '<div class="field span2"><label>Supplier model code</label><input name="code" maxlength="120" autocomplete="off" placeholder="e.g. TD-1935-8"></div>'+
  '<div class="field span2"><label>Product description</label><input name="name" maxlength="220" placeholder="e.g. Gold crystal chandelier"></div>'+
  '<div class="field span2"><label>Original size (as printed)</label><input name="dimension" maxlength="150" placeholder="e.g. Ø730 × H970 mm"></div>'+
@@ -605,7 +610,18 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
   requestAnimationFrame(keepViewport);
   break;
 }case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'tlPick':tlPickDrawer(id);break;case 'tlCropPreset':if(MODAL?.type==='tl-pick')tlSetPickerCrop(TL_CROP_PRESETS[b.dataset.preset]);break;case 'item':itemDrawer(id);break;case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{if(ACTIVE_BRAND_ID==='tl'&&PACK?.items?.some(x=>x.id===id&&x.source==='tl-chandelier')){tlPickDrawer(id);break}if(!selectionForItem(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}S.catalog[id]={...candidateEntry(item),decision:'Select',qty:1};if(!S.shortlist.includes(id))S.shortlist.push(id)}else{toast('Already in My selections');break}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportFamilies':await exportFamiliesExcel(false);break;case 'exportFamiliesWithCost':await exportFamiliesExcel(true);break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
-document.addEventListener('change',async e=>{if(!window.LITeamSync?.status()?.connected)return;const t=e.target;if(t.id==='packFile'&&t.files[0]){await importCatalog(t.files[0]);t.value='';return}if(t.id==='restoreFile'&&t.files[0]){await restore(t.files[0]);t.value='';return}if(t.id==='brandCatalogFiles'&&t.files.length){await uploadBrandFiles(t.files);t.value='';return}if(t.dataset.action==='productPhoto'&&t.files[0]){try{await updateManualProductPhoto(t.dataset.id,t.files[0])}catch(err){alert('Photo upload failed: '+err.message)}t.value='';return}if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={};if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}const entry=S[collection][t.dataset.id];
+document.addEventListener('change',async e=>{if(!window.LITeamSync?.status()?.connected)return;const t=e.target;if(t.id==='tlModelChoice'&&MODAL?.type==='tl-pick'){
+  const source=PACK?.items?.find(i=>i.id===MODAL.id);
+  const idx=t.value===''?-1:Number(t.value);
+  const m=Number.isInteger(idx)?source?.modelCandidates?.[idx]:null;
+  const form=$('tlPickForm');
+  if(form&&m){
+    form.elements.code.value=m.code||'';
+    form.elements.dimension.value=m.dimension||'';
+    if(!form.elements.name.value.trim())form.elements.name.value='Tong Luo chandelier';
+  }
+  return;
+ }if(t.id==='packFile'&&t.files[0]){await importCatalog(t.files[0]);t.value='';return}if(t.id==='restoreFile'&&t.files[0]){await restore(t.files[0]);t.value='';return}if(t.id==='brandCatalogFiles'&&t.files.length){await uploadBrandFiles(t.files);t.value='';return}if(t.dataset.action==='productPhoto'&&t.files[0]){try{await updateManualProductPhoto(t.dataset.id,t.files[0])}catch(err){alert('Photo upload failed: '+err.message)}t.value='';return}if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={};if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}const entry=S[collection][t.dataset.id];
 if(t.dataset.key==='decision'&&['Select','Approved'].includes(t.value)&&
   !['Select','Approved'].includes(entry.decision||'Review')&&
   !(Number(entry.qty)>0))entry.qty=1;
