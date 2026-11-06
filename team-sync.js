@@ -18,9 +18,9 @@
  function settingsValid(){return /^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/exec$/.test(normalizeConfigValue(config.scriptUrl))}
  function clearRememberedSession(){try{sessionStorage.removeItem(SESSION_KEY)}catch(_){}}
  function tokenExpiresAt(t){try{const p=JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));return p.aud==='authenticated'&&p.iss==='https://msxvnaintafqdgheutfu.supabase.co/auth/v1'&&Number.isFinite(Number(p.exp))?Number(p.exp)*1000:0}catch(_){return 0}}
- function rememberVerifiedSession(){const expiry=tokenExpiresAt(token);if(!email||!role||expiry<=Date.now()+60000)return;try{sessionStorage.setItem(SESSION_KEY,JSON.stringify({token,expires:expiry,clientId:config.clientId}))}catch(_){}}
- function restoreRememberedSession(){try{const saved=JSON.parse(sessionStorage.getItem(SESSION_KEY)||'null');if(!saved||saved.clientId!==config.clientId||saved.expires<=Date.now()+60000||saved.expires!==tokenExpiresAt(saved.token)){clearRememberedSession();return false}token=saved.token;status='connecting';return true}catch(_){clearRememberedSession();return false}}
- function invalidIdentity(err){return /SIGN_IN_EXPIRED|SIGN_IN_REQUIRED|INVALID_GOOGLE_IDENTITY|ACCESS_DENIED|invalid token|expired token/i.test(String(err?.message||''))}
+ function rememberVerifiedSession(){/* Supabase Auth manages refresh and persistence. */}
+ function restoreRememberedSession(){return false}
+ function invalidIdentity(err){return /INVALID_SUPABASE_IDENTITY|ACCESS_DENIED|TOKEN_REVOKED/i.test(String(err?.message||''))}
  function scheduleRetry(){if(!token||reconnectTimer||reconnectAttempts>=3)return;const delay=[3000,7500,16000][reconnectAttempts++];reconnectTimer=setTimeout(()=>{reconnectTimer=null;authenticateCurrentToken()},delay)}
  async function authenticateCurrentToken(){
   if(!token||credentialInFlight)return;
@@ -104,7 +104,7 @@
  async function ensureReady(){if(!ready&&bridgeMode==='iframe'&&iframe&&iframe.dataset.liBridgeFailed==='yes'){iframe.remove();iframe=null;bridgePeer=null;bridgeOrigin='';bridgeNonce=''}frame();if(bridgeMode==='popup'&&bridgePopup?.closed)throw Error('Secure connection window was closed. Reopen it in Team selections.');
   if(ready)return;const start=Date.now();while(!ready&&Date.now()-start<18000){if(bridgeMode==='popup'&&bridgePopup?.closed)break;await new Promise(r=>setTimeout(r,180))}
   if(!ready){if(bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';throw Error(bridgeMode==='popup'?'Secure Google connection window did not respond. Check if it shows a Google permission or browser error.':'Google Apps Script could not connect inside Chrome. Use Open secure connection window below. If that also fails, check the active Code.gs / Bridge.html deployment.')} }
- async function call(op,payload={}){if(!token)throw Error('Sign in with Google first');await ensureReady();const id='req_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
+ async function call(op,payload={}){if(!token)throw Error('Sign in with Supabase first');await ensureReady();const id='req_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2);
   return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{reqs.delete(id);reject(Error('Team server did not respond'))},32000);
    reqs.set(id,{timer,resolve:result=>{if(result?.ok)resolve(result.data);else reject(Error(result?.error||'Team sync request failed'))}});
    bridgePeer.postMessage({kind:'LI_SYNC_REQUEST',liNonce:bridgeNonce,id,token,op,payload},bridgeOrigin);
@@ -170,9 +170,9 @@ async function connectButton(force=false){
     paint();
   }
 }
-function paintStatusOnly(){const t=document.getElementById('teamSyncNotice');if(t)t.textContent=token?(email&&role?'Signed in as '+email+' · '+role:'Verifying Google sign-in and team access…'):ready?'Google connection ready. Sign in to share selections.':'Sign in with Google to access team selections';syncAccessGate()}
+function paintStatusOnly(){const t=document.getElementById('teamSyncNotice');if(t)t.textContent=token?(email&&role?'Signed in as '+email+' · '+role:'Verifying Supabase role and team access…'):'Sign in using Supabase to access team selections';syncAccessGate()}
 async function onCredential(credential){if(!credential?.credential)return;token=credential.credential;clearRememberedSession();await authenticateCurrentToken()}
- function disconnect(keepConfig=true,explicitSignOut=false){
+ function disconnect(keepConfig=true,explicitSignOut=false){if(explicitSignOut)window.LISelectionIdentity?.signOut?.().catch(err=>console.warn(err));
   if(explicitSignOut&&window.google?.accounts?.id){
     try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
   }
@@ -187,7 +187,7 @@ async function onCredential(credential){if(!credential?.credential)return;token=
    if(name===record.name&&itemName===item.name)return record;
    return {...record,name,item:{...item,name:itemName}};
  }
- async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);brands=data.brands||[];users=data.users||[];window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
+ async function refresh(){const data=await call('list');const r=window.LISelectionIdentity?.status()?.role;if(!r||data.user.role!==r)throw Error('Product Selection permissions do not match Supabase. Ask Super Admin to reconcile your role.');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);brands=data.brands||[];users=data.users||[];window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
   // Create lightweight brand records for shared suppliers without overwriting local private catalogs.
   const existing=new Set(BRANDS.map(x=>x.id));let changed=false;for(const b of brands){if(!existing.has(b.id)){BRANDS.push({id:b.id,name:b.name,category:b.category||'Other',shared:true});changed=true}}if(changed)persistBrandDirectory();
   return data}
@@ -707,11 +707,22 @@ async function exportTeamExcel(mode='without'){
    '<label class="field"><span>Assigned role</span><select name="role">'+roleOptions('Staff')+'</select></label></div>'+
    '<div class="row-actions"><button class="btn" type="submit"'+(userManageBusy?' disabled':'')+'>Authorize user</button></div></form></div></div>';
  }
- function render(){const root=document.getElementById('app');if(!root)return;
+ function render(){const root=document.getElementById('app');if(!root)return;if(!token){root.innerHTML='<div class="candidate-row">Sign in using the secure Supabase form above.</div>';return}
   if(!settingsValid()){root.innerHTML=`<div class="candidate-row" style="max-width:760px"><h2>Secure Google Sheets team synchronization</h2><p>Configure your dedicated Google Apps Script service and Google OAuth Client ID. The Google Sheet is private; users must be authorized before seeing any selection.</p><form id="liSyncConfigForm"><div class="field"><label>Apps Script Web App /exec URL</label><input name="scriptUrl" type="url" placeholder="https://script.google.com/macros/s/.../exec" required></div><div class="field" style="margin-top:12px"><label>Google OAuth Web Client ID</label><input name="clientId" placeholder="123...apps.googleusercontent.com" required></div><div class="row-actions"><button type="submit" class="btn">Save connection settings</button></div></form><p class="tiny">An Apps Script deployment is required before real-time sharing can begin. Do not paste a password, service account key, or API secret.</p></div>`;return}
   root.innerHTML=`<div class="candidate-row"><div class="variant-top"><div><h2>Shared Team Selections</h2><p class="tiny" id="teamSyncNotice">${esc(email&&role?'Signed in as '+email+' · '+role:token?'Verifying Google sign-in and team access…':'Sign in with Google to access team selections')}</p>${lastError?`<p class="alert">${esc(lastError)}</p><div class="row-actions"><button class="btn secondary small" data-sync-action="openBridgePopup">Open secure Google connection window</button><a class="btn quiet small" href="'+esc(config.scriptUrl)+'" target="_blank" rel="noopener">Check deployed Web App URL</a></div>`:''}</div><div class="row-actions">${role==='Super Admin'?'<button class="btn quiet small" data-sync-action="reconfigure">Connection settings</button>':''}${token?'<button class="btn quiet small" data-sync-action="signout">Sign out</button>':''}</div></div>${!token?'<div id="liGoogleSignIn" style="min-height:50px;margin:12px 0"></div><p id="teamSyncConnectError" class="alert" hidden></p><div class="row-actions"><button class="btn secondary small" data-sync-action="retrySignIn">Show Google Sign-In</button><button class="btn quiet small" data-sync-action="openBridgePopup">Open secure connection window</button></div>':email&&role?`<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button><button class="btn small" data-sync-action="publish">Share my current ${esc(brandNow().name)} selections</button><span class="tiny">Last refreshed: ${esc(lastFetched||'—')} · ${records.length} records</span></div>`:'<div class="row-actions"><button class="btn secondary small" data-sync-action="retryConnection">Retry team connection</button><span class="tiny">Google account received; checking team authorization</span></div>'}<p class="tiny">Approved staff can browse private supplier catalogs after Google sign-in. New selections and edits sync while signed in; previously saved local drafts are not bulk-published automatically.</p></div>${email&&role?`<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>${teamBrandFilterToolbar()}<div class="row-list">${rowsHTML()}</div>${adminCatalogForm()}`:''}`;
   if(!token){const slot=document.getElementById('liGoogleSignIn');if(slot)slot.insertAdjacentHTML('afterend',repairClientMarkup());showGoogleButton();if(!signInStarted&&status!=='error'){signInStarted=true;connectButton().catch(e=>{status='error';lastError=e.message;paint()})}}}
- document.addEventListener('submit',e=>{if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target);return}if(e.target.matches('[data-team-edit-form]')){e.preventDefault();saveEditedUser(e.target);return}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
+ document.addEventListener('submit',e=>{if(e.target.id==='liSupabaseLogin'){
+  e.preventDefault();
+  const form=e.target,button=form.querySelector('[type="submit"]');
+  const d=new FormData(form);
+  if(button){button.disabled=true;button.textContent='Signing in…'}
+  lastError='';
+  window.LISelectionIdentity.signIn(String(d.get('email')||''),String(d.get('password')||''))
+   .then(()=>{status='connecting';paint()})
+   .catch(err=>{status='auth-required';lastError=err.message;const p=document.getElementById('liSupabaseSignInError');if(p){p.hidden=false;p.textContent=err.message}})
+   .finally(()=>{if(button){button.disabled=false;button.textContent='Sign in'}});
+  return;
+ }if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target);return}if(e.target.matches('[data-team-edit-form]')){e.preventDefault();saveEditedUser(e.target);return}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
  document.addEventListener('toggle',event=>{
    const detail=event.target;
    if(detail?.matches?.('details[data-team-duplicate-key]'))
