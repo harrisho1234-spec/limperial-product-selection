@@ -645,6 +645,15 @@ async function exportTeamExcel(withCost=false){
      new Set(specs.map(spec=>normalize(spec[field.key]))).size>1
    );
  }
+ // Purely visual review markers. Decisions are still read from the existing
+ // persisted records; no client-side approval state is changed here.
+ function teamReviewBadge(decision,compact=false){
+   if(decision!=='Approved'&&decision!=='Rejected')return '';
+   const approved=decision==='Approved';
+   return '<span class="team-review-badge '+(approved?'team-review-approved':'team-review-rejected')+
+     (compact?' team-review-badge-compact':'')+'" aria-label="Review status: '+decision+'">'+
+     '<span aria-hidden="true">'+(approved?'✓':'✕')+'</span> '+decision+'</span>';
+ }
  function renderTeamDuplicateGroup(group,renderRow){
    const different=teamDuplicateDifferences(group),first=group.records[0];
    // Prefer any available authorized photo among the staff submissions.
@@ -657,7 +666,14 @@ async function exportTeamExcel(withCost=false){
      photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(photoRecord);
    const brand=brands.find(b=>b.id===first.brandId)?.name||
     (typeof BRANDS!=='undefined'?BRANDS.find(b=>b.id===first.brandId)?.name:null)||first.brandId||'Supplier';
-   const pending=group.records.filter(r=>!['Approved','Rejected'].includes(r.decision)).length;
+   const approvedCount=group.records.filter(r=>r.decision==='Approved').length;
+   const rejectedCount=group.records.filter(r=>r.decision==='Rejected').length;
+   const pending=group.records.length-approvedCount-rejectedCount;
+   const reviewCounts='<span class="team-review-summary" aria-label="Review decisions in group">'+
+     (approvedCount?'<span class="team-review-count team-review-count-approved">✓ '+approvedCount+' approved</span>':'')+
+     (rejectedCount?'<span class="team-review-count team-review-count-rejected">✕ '+rejectedCount+' rejected</span>':'')+
+     (pending?'<span class="team-review-count team-review-count-pending">'+pending+' pending</span>':'')+
+     '</span>';
    const open=TEAM_DUP_OPEN.has(group.key)?TEAM_DUP_OPEN.get(group.key):different.length>0;
    const differenceLabels=different.map(f=>f.label).join(', ');
    // A shared product code is a family of submissions, not proof of duplicates.
@@ -672,18 +688,18 @@ async function exportTeamExcel(withCost=false){
    const displayValue=v=>v?esc(v):'<span class="team-dup-unspecified">Not specified</span>';
    const compare=different.length?'<div class="team-dup-comparison">'+
      '<div class="team-dup-comparison-title">Compare product variations before approving (same code does not mean duplicate)</div>'+
-     '<div class="team-dup-table-scroll"><table class="team-dup-table"><thead><tr><th>Selected by</th><th>Qty</th>'+
+     '<div class="team-dup-table-scroll"><table class="team-dup-table"><thead><tr><th>Selected by</th><th>Review</th><th>Qty</th>'+
      different.map(f=>'<th>'+esc(f.label)+'</th>').join('')+'</tr></thead><tbody>'+
      group.records.map(r=>{
        const spec=teamSelectionSpecification(r);
-       return '<tr><td>'+esc(teamOwnerName(r))+'</td><td>'+esc(r.qty??r.entry?.qty??'—')+'</td>'+
+       return '<tr><td>'+esc(teamOwnerName(r))+'</td><td>'+ (teamReviewBadge(r.decision,true)||'<span class="team-review-pending-label">Pending review</span>') +'</td><td>'+esc(r.qty??r.entry?.qty??'—')+'</td>'+
         different.map(f=>'<td>'+displayValue(spec[f.key])+'</td>').join('')+'</tr>';
      }).join('')+'</tbody></table></div></div>':
      '<p class="team-dup-same">No differences in product or requested specifications. Staff quantities and approvals remain separate.</p>';
    return '<details class="team-duplicate-group" data-team-duplicate-key="'+esc(group.key)+'"'+(open?' open':'')+'>'+
      '<summary class="team-duplicate-summary"><div class="team-duplicate-photo">'+img+'</div>'+
      '<span class="team-duplicate-title"><b>'+esc(brand)+' · '+esc(group.code)+'</b>'+
-     '<span>'+(hasVariations?variationCount+' product variations':group.records.length+' team submissions')+' · '+pending+' awaiting review</span>'+
+     '<span>'+(hasVariations?variationCount+' product variations':group.records.length+' team submissions')+' · '+pending+' awaiting review</span>'+reviewCounts+
      '<span class="'+(different.length?'team-dup-different':'team-dup-identical')+'">'+note+'</span></span>'+
      '<span class="team-duplicate-expand">'+(open?'Review entries':'Open entries')+'</span></summary>'+
      '<div class="team-duplicate-body">'+compare+
@@ -711,6 +727,8 @@ async function exportTeamExcel(withCost=false){
    const removeAction=canRemove?
     '<button type="button" class="btn danger small" data-sync-action="removeShared" data-record-id="'+esc(r.recordId)+'">Remove from Team selections</button>':'';
    const decision=String(r.decision||'Review');
+   const reviewed=decision==='Approved'||decision==='Rejected';
+   const rowDecisionClass=decision==='Approved'?' team-list-row-approved':decision==='Rejected'?' team-list-row-rejected':'';
    const status=String(r.supplierStatus||'Not requested');
    const recordName=String(r.name||r.item?.name||'Product');
    const owner=teamOwnerName(r);
@@ -725,7 +743,7 @@ async function exportTeamExcel(withCost=false){
     (specInfo?'<div class="team-list-request-details">'+specInfo+'</div>':'')+
     (removeAction?'<div class="row-actions">'+removeAction+'</div>':'')+
     '</div></details>';
-   return '<article class="team-list-row" role="listitem">'+
+   return '<article class="team-list-row'+rowDecisionClass+'" role="listitem">'+
     '<div class="team-list-top">'+
      '<div class="team-list-photo" title="Product preview from authorized supplier catalog">'+img+'</div>'+
      '<div class="team-list-product"><div class="tiny">'+esc(brand)+' · '+esc(r.kind)+'</div>'+
@@ -735,7 +753,7 @@ async function exportTeamExcel(withCost=false){
      '<div class="team-list-owner"><span class="team-list-mobile-label">Selected by</span>'+
       '<span title="'+esc(owner)+'">'+esc(owner)+'</span></div>'+
      '<div class="team-list-state"><div class="team-list-badges">'+
-      '<span class="pill '+(decision==='Approved'?'green':decision==='Rejected'?'warn':'gold')+'">'+esc(decision)+'</span>'+
+      (reviewed?teamReviewBadge(decision):'<span class="pill gold">'+esc(decision)+'</span>')+
       '<span class="pill">'+esc(status)+'</span></div>'+
       '<span class="team-list-qty">Qty '+esc(r.qty??'—')+'</span>'+
       (['Super Admin','Admin'].includes(role)?(window.LISelectionCosts?.rowMarkup?.(r)||''):'')+'</div>'+
