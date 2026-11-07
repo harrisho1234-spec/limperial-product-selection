@@ -1150,5 +1150,5 @@ async function exportTeamExcel(withCost=false){
   if(dest&&moving!==dest.recordId)placeTeamRecord(moving,teamRecordRound(dest),dest.recordId);
  });
  document.addEventListener('dragend',()=>{draggingTeamRecord=''});
- window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),refresh,disconnect,request:call};
+ window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),getSharedSelectionRounds:(brandId)=>teamRoundsAvailable()?sharedRounds.filter(r=>r.brandId===brandId).map(r=>({id:r.id,name:r.name,shared:true})):[],refresh,disconnect,request:call};
 })();
