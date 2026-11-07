@@ -298,7 +298,7 @@ function renderSelected(){
   '<div class="statbox"><strong>'+selectedVariants.length+'</strong><small>Family versions selected</small></div>'+
   '<div class="statbox"><strong>'+orderRows().length+'</strong><small>Approved and confirmed</small></div></div>'+
   selectionRoundsBar()+
-  '<div class="toolbar"><button class="btn" data-action="exportDraft" '+(draftRows().length?'':'disabled')+'>⬇ Download selected designs (.xlsx)</button>'+
+  '<div class="toolbar"><button class="btn" data-action="exportDraft" '+(draftRows(active).length?'':'disabled')+' aria-label="Download '+q(draftRoundLabel(active))+' as Excel">⬇ Download '+q(draftRoundLabel(active))+' (.xlsx)</button>'+
   '<span class="tiny">Groups organize your work; existing approval statuses and supplier confirmations remain unchanged.</span></div>'+
   (cards||'<div class="empty"><h2>No selections yet</h2><button class="btn secondary" data-action="goto" data-to="discover">Browse catalog</button></div>');
 }
@@ -390,7 +390,22 @@ function showDrawer(){$('overlay').classList.remove('hidden');document.body.styl
 function download(name,text,type='application/json'){const blob=new Blob([text],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),15000)}
 function backup(){download('LImperial_'+brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Selections_'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({format:'limperial-selection-backup',version:2,brandId:ACTIVE_BRAND_ID,brandName:brandNow().name,when:new Date().toISOString(),state:S},null,2));toast('Selection backup downloaded for '+brandNow().name)}
 async function restore(file){try{const b=JSON.parse(await file.text());if(b.format!=='limperial-selection-backup'||!b.state)throw Error('Invalid selection backup');if((b.brandId||'asfour')!==ACTIVE_BRAND_ID)throw Error('Backup is for another brand. Open that brand first.');if(!confirm('Replace the selections stored on this browser with the backup?'))return;S=b.state;save();render();toast('Selections restored')}catch(e){alert('Restore failed: '+e.message)}}
-function draftRows(){const chosen=['Select','Approved'];return [...allVariants().filter(v=>chosen.includes(variantEntry(v).decision)).map(item=>({id:item.id,item,entry:variantEntry(item),family:item.familyId})),...candidates().filter(i=>chosen.includes(candidateEntry(i).decision)).map(item=>({id:item.id,item,entry:candidateEntry(item),family:'CATALOG'}))]}
+// The optional round filter applies to both catalog items and family variations.
+// Keep 'all' as the default for the Order Preparation draft workflow.
+function draftRows(roundId='all'){
+ const chosen=['Select','Approved'];
+ const rows=[
+  ...allVariants().filter(v=>chosen.includes(variantEntry(v).decision))
+    .map(item=>({id:item.id,item,entry:variantEntry(item),family:item.familyId})),
+  ...candidates().filter(i=>chosen.includes(candidateEntry(i).decision))
+    .map(item=>({id:item.id,item,entry:candidateEntry(item),family:'CATALOG'}))
+ ];
+ return roundId==='all'?rows:rows.filter(r=>entryRoundId(r.entry)===roundId);
+}
+function draftRoundLabel(roundId){return roundId==='all'?'All Selections':roundName(roundId)}
+function draftRoundFileTag(roundId){
+ return (draftRoundLabel(roundId).replace(/[^a-z0-9_-]+/gi,'_').replace(/^_+|_+$/g,'').slice(0,45)||'Selection');
+}
 
 function visibleFamilyExportData(){
   const matching=String(SEARCH||'').trim().toLowerCase();
@@ -558,7 +573,7 @@ async function exportFamiliesExcel(withCost=false){
     if(btn){btn.disabled=false;btn.textContent=label}
   }
 }
-function exportDraftCsv(rows){
+function exportDraftCsv(rows,roundId='all'){
   // CSV cannot embed product photos, but uses the same six informational fields as the Excel export.
   const header=['No.','Code','Original size','Requested size','Qty','Crystal / finish','Custom request'];
   const body=rows.map((r,i)=>{
@@ -566,18 +581,21 @@ function exportDraftCsv(rows){
     return [i+1,e.code||'Custom reference pending',originalSizeFor(r),requestedSizeFor(r),e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
   });
   const csv=[header,...body].map(row=>row.map(value=>'"'+String(value??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
-  download(brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_Selections.csv',csv,'text/csv;charset=utf-8');
+  download(brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_'+draftRoundFileTag(roundId)+'.csv',csv,'text/csv;charset=utf-8');
 }
 async function exportDraft(){
-  const rows=draftRows();
-  if(!rows.length){toast('Select a product first to download a draft');return;}
-  if(!window.ExcelJS){exportDraftCsv(rows);toast('Excel library unavailable; downloaded CSV draft instead');return;}
+  // My Selections follows the group dropdown; Order Preparation keeps its
+  // existing all-groups draft behavior.
+  const roundId=VIEW==='selected'?chosenRoundId():'all';
+  const rows=draftRows(roundId);
+  if(!rows.length){toast('No selected products to export in '+draftRoundLabel(roundId));return;}
+  if(!window.ExcelJS){exportDraftCsv(rows,roundId);toast('Excel library unavailable; downloaded '+draftRoundLabel(roundId)+' CSV instead');return;}
   try{
     const book=new ExcelJS.Workbook();
     book.creator="L'Imperial Product Selection Studio";
     const ws=book.addWorksheet('Draft Selections',{views:[{state:'frozen',ySplit:2}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}});
     ws.mergeCells('A1:H1');
-    ws.getCell('A1').value="L'IMPERIAL · "+brandNow().name.toUpperCase()+" DRAFT SELECTION — NOT A PURCHASE ORDER";
+    ws.getCell('A1').value="L'IMPERIAL · "+brandNow().name.toUpperCase()+" · "+draftRoundLabel(roundId).toUpperCase()+" — DRAFT, NOT A PURCHASE ORDER";
     ws.getCell('A1').font={bold:true,size:14,color:{argb:'FFFFFFFF'}};
     ws.getCell('A1').fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF13233A'}};
     ws.getRow(1).height=36;
@@ -603,14 +621,14 @@ async function exportDraft(){
     const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;
-    a.download=brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_Selections_'+new Date().toISOString().slice(0,10)+'.xlsx';
+    a.download=brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_'+draftRoundFileTag(roundId)+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
     document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),15000);
-    toast('Downloaded '+rows.length+' draft selections with product photos');
+    toast('Downloaded '+rows.length+' products from '+draftRoundLabel(roundId)+' with photos');
   }catch(err){
     console.error('Draft export error',err);
-    exportDraftCsv(rows);
-    toast('Excel export failed; downloaded CSV draft instead');
+    exportDraftCsv(rows,roundId);
+    toast('Excel export failed; downloaded '+draftRoundLabel(roundId)+' as CSV instead');
   }
 }
 function exportCsv(){const rows=orderRows(),header=['No.','Item Description','Qty','Crystal','Photo Reference','Supplier remarks'];const body=rows.map((r,i)=>[i+1,description(r),r.entry.qty,r.entry.crystal,refLabel(r),r.entry.request]);const csv=[header,...body].map(a=>a.map(x=>'"'+String(x??'').replaceAll('"','""')+'"').join(',')).join('\r\n');download(brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Supplier_Order.csv',csv,'text/csv');}
