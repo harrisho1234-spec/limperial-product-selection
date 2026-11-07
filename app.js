@@ -35,7 +35,12 @@ function readState(){const d={family:{},variants:{},catalog:{},shortlist:[],manu
 function save(){localStorage.setItem(stateKey(ACTIVE_BRAND_ID),JSON.stringify(S)); updateBadges();window.LITeamSync?.localSaved()}
 
 function selectionRounds(){
- const list=Array.isArray(S.selectionRounds)?S.selectionRounds.filter(x=>x&&typeof x.id==='string'&&typeof x.name==='string'):[];
+ const own=Array.isArray(S.selectionRounds)?S.selectionRounds.filter(x=>x&&typeof x.id==='string'&&typeof x.name==='string'):[];
+ const shared=window.LITeamSync?.getSharedSelectionRounds?.(ACTIVE_BRAND_ID)||[];
+ const list=[...shared];
+ for(const item of own)if(!list.some(x=>x.id===item.id)){
+  list.push({...item,name:shared.some(x=>x.name===item.name)?item.name+' (Personal)':item.name});
+ }
  if(!list.some(x=>x.id==='round-1'))list.unshift({id:'round-1',name:'1st Selection'});
  return list;
 }
@@ -58,8 +63,8 @@ function selectionRoundsBar(){
   selectionRounds().map(r=>{const count=candidates().filter(i=>entryRoundId(candidateEntry(i))===r.id).length+
     selected.filter(v=>entryRoundId(variantEntry(v))===r.id).length;
     return '<option value="'+q(r.id)+'" '+(current===r.id?'selected':'')+'>'+q(r.name)+' ('+count+')</option>'}).join('')+
-  '</select><button type="button" class="btn secondary small" data-action="newSelectionRound">＋ New group</button>'+
-  (current!=='all'?'<button type="button" class="btn quiet small" data-action="renameSelectionRound">Rename</button>':'')+
+  '</select><button type="button" class="btn secondary small" data-action="newSelectionRound">＋ Personal group</button>'+
+  (current!=='all'&&!selectionRounds().find(r=>r.id===current)?.shared?'<button type="button" class="btn quiet small" data-action="renameSelectionRound">Rename personal group</button>':'')+
   '<span class="tiny">New products go to '+q(roundName(current==='all'?'round-1':current))+'. Previous selections stay in their groups.</span></div>';
 }
 function createSelectionRound(){
@@ -68,14 +73,15 @@ function createSelectionRound(){
  if(input===null)return;
  const name=input.trim().slice(0,60);if(!name)return alert('Please enter a name.');
  let id;do{id='round-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7)}while(rounds.some(r=>r.id===id));
- S.selectionRounds=[...rounds,{id,name}];S.activeRoundId=id;save();render();toast('Created '+name);
+ S.selectionRounds=[...(Array.isArray(S.selectionRounds)?S.selectionRounds:[]).filter(r=>!window.LITeamSync?.getSharedSelectionRounds?.(ACTIVE_BRAND_ID)?.some(x=>x.id===r.id)),{id,name}];S.activeRoundId=id;save();render();toast('Created personal group '+name);
 }
 function renameSelectionRound(){
  const id=chosenRoundId();if(id==='all')return;
  const rounds=selectionRounds(),old=rounds.find(x=>x.id===id);if(!old)return;
+ if(old.shared)return alert('Shared group names can only be changed by Admin in Team Selections.');
  const input=prompt('Rename selection group:',old.name);if(input===null)return;
  const name=input.trim().slice(0,60);if(!name)return alert('Please enter a name.');
- S.selectionRounds=rounds.map(r=>r.id===id?{...r,name}:r);save();render();toast('Renamed to '+name);
+ S.selectionRounds=(Array.isArray(S.selectionRounds)?S.selectionRounds:[]).map(r=>r.id===id?{...r,name}:r);save();render();toast('Renamed to '+name);
 }
 
 function toast(msg){let e=$('toast');e.textContent=msg;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),3000)}
