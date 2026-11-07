@@ -5,7 +5,7 @@
  const KEY='li-team-sync-client-config-v1';const SESSION_KEY='li-team-browser-session-v1';const APP_ORIGIN=location.origin;
  const DEFAULT_CONFIG={scriptUrl:'https://script.google.com/macros/s/AKfycbzlXPtmjhHpTot4R0ItabhBOQBrNamB2TUegdq6Lde-uX930U1hIohNqRsvUzMW5LYc1g/exec',clientId:'97172665640-k7lq4tqtl8jl3udei8f4f7tml8agfil4.apps.googleusercontent.com'};let config={...DEFAULT_CONFIG}; // Fixed trusted backend: never send a Supabase bearer token to a browser-configured URL.
  let iframe=null,bridgePopup=null,bridgePeer=null,bridgeOrigin='',bridgeNonce='',bridgeMode='iframe',signInStarted=false,ready=false,token='',email='',role='',displayName='';
- let records=[],brands=[],users=[],lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
+ let records=[],brands=[],users=[],serverFeatures={},lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
  let editingUserEmail='',userManageBusy=false,userManageNotice='',userManageIsError=false;
  const TEAM_BRAND_FILTER_KEY='li-team-brand-filter-v1';
  let teamBrandFilter='all';
@@ -222,7 +222,7 @@ async function onSupabaseIdentity(identity){
   if(explicitSignOut&&window.google?.accounts?.id){
     try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
   }
-  window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';hasUnlockedOnce=false;paint()}
+  window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];serverFeatures={};versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';hasUnlockedOnce=false;paint()}
  function sanitizeTeamRecordPrice(record){
    if(!record||record.brandId!=='asfour')return record;
    const item=record.item||{};
@@ -233,7 +233,7 @@ async function onSupabaseIdentity(identity){
    if(name===record.name&&itemName===item.name)return record;
    return {...record,name,item:{...item,name:itemName}};
  }
- async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);brands=data.brands||[];users=data.users||[];window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
+ async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);brands=data.brands||[];users=data.users||[];serverFeatures=data.features||{};window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
   // Create lightweight brand records for shared suppliers without overwriting local private catalogs.
   const existing=new Set(BRANDS.map(x=>x.id));let changed=false;for(const b of brands){if(!existing.has(b.id)){BRANDS.push({id:b.id,name:b.name,category:b.category||'Other',shared:true});changed=true}}if(changed)persistBrandDirectory();
   return data}
@@ -699,7 +699,7 @@ async function exportTeamExcel(withCost=false){
      const sameStatus=cluster.every(r=>r.decision===cluster[0].decision && r.supplierStatus===cluster[0].supplierStatus);
      const label=teamOwnerName(cluster[0])+' · '+cluster.length+' entries · recorded qty '+recordedQty;
      const safeKey=esc(key);
-     const actions=['Super Admin','Admin'].includes(role)&&!allSeparate?
+     const actions=['Super Admin','Admin'].includes(role)&&serverFeatures.duplicateReview===true&&!allSeparate?
        '<div class="team-dup-review-actions">'+
         (sameStatus?'<button type="button" class="btn small" data-sync-action="mergeExactDuplicates" data-duplicate-key="'+safeKey+'">Merge entries…</button>':
          '<span class="tiny">Mixed decisions: review each status before merging.</span>')+
@@ -714,7 +714,7 @@ async function exportTeamExcel(withCost=false){
    }).join('')+'</div>';
  }
  async function editTeamQuantity(recordId){
-  if(!['Super Admin','Admin'].includes(role))return;
+  if(!['Super Admin','Admin'].includes(role)||serverFeatures.teamQtyEdit!==true)return;
   const r=records.find(x=>x.recordId===recordId&&!x.deleted);if(!r)return;
   const value=prompt('Edit Team Selection quantity for '+(r.code||r.name||'product')+
     ' · '+teamOwnerName(r)+'\nCurrent qty: '+r.qty+'\nEnter the new TOTAL quantity (whole number 0–9999):',String(r.qty));
@@ -733,7 +733,7 @@ async function exportTeamExcel(withCost=false){
   }catch(error){lastError='Unable to edit Team quantity: '+error.message;status='error';paint()}
  }
  async function reviewExactDuplicateGroup(key,action){
-  if(!['Super Admin','Admin'].includes(role))return;
+  if(!['Super Admin','Admin'].includes(role)||serverFeatures.duplicateReview!==true)return;
   const refs=TEAM_DUP_CANDIDATES.get(key);if(!refs||refs.length<2)return;
   const chosen=refs.map(x=>records.find(r=>r.recordId===x.recordId&&!r.deleted));
   if(chosen.some(x=>!x)){alert('Selections changed. Refresh Team Selections first.');return}
@@ -840,7 +840,7 @@ async function exportTeamExcel(withCost=false){
    const approve=canApprove?
     '<button class="btn small" data-sync-action="approve" data-record-id="'+esc(r.recordId)+'">Approve &amp; confirm</button>'+
     '<button class="btn danger small" data-sync-action="reject" data-record-id="'+esc(r.recordId)+'">Reject</button>':'';
-   const editQtyAction=['Super Admin','Admin'].includes(role)?
+   const editQtyAction=['Super Admin','Admin'].includes(role)&&serverFeatures.teamQtyEdit===true?
     '<button type="button" class="btn secondary small" data-sync-action="editTeamQty" data-record-id="'+esc(r.recordId)+'">Edit Qty</button>':'';
    const importAction=canImport?
     '<button class="btn quiet small" data-sync-action="import" data-record-id="'+esc(r.recordId)+'">Use in selections</button>':'';
@@ -951,7 +951,7 @@ async function exportTeamExcel(withCost=false){
     '<div class="row-actions"><button class="btn secondary small" data-sync-action="refresh">↻ Refresh team selections</button>'+
     '<button class="btn small" data-sync-action="publish">Share my current '+esc(brandNow().name)+' selections</button>'+
     '<span class="tiny">Last refreshed: '+esc(lastFetched||'—')+' · '+records.length+' records</span></div>'+
-    '<p class="tiny">Authenticated staff can browse approved private supplier catalogs. Product selections and approvals remain synchronized through the existing protected Google Sheet.</p></div>'+
+    '<p class="tiny">Authenticated staff can browse approved private supplier catalogs. Product selections and approvals remain synchronized through the existing protected Google Sheet.</p>'+ (['Super Admin','Admin'].includes(role)&&serverFeatures.teamQtyEdit!==true?'<p class="tiny">Quantity editing and duplicate review will activate after the new private Google Apps Script backend is deployed.</p>':'')+'</div>'+
     '<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>'+
     teamBrandFilterToolbar()+'<div class="row-list">'+rowsHTML()+'</div>'+adminCatalogForm();
  }
