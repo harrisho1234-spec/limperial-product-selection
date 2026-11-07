@@ -154,6 +154,9 @@ function isAsfourInformationPage(item){
   String(item.name||'').startsWith('Chandeliers Collections (2020)');
 }
 function filteredCatalogItems(){return PACK.items.filter(x=>
+ // Duplicate PDF photo crops are not separate products. Keep any already
+ // selected legacy references visible so old selections remain editable.
+ (!x.catalogDuplicateOf || !!S.catalog[x.id] || S.shortlist.includes(x.id))&&
  (ACTIVE_BRAND_ID==='tl'? (TL_CATALOG_VIEW==='pages'?(!!x.tlPageReference||(x.source==='tl-chandelier'&&!x.code)):(!!x.tlIndividualModel||(x.source==='tl-chandelier'&&!!x.code))):!x.splitParent)&&
  (ACTIVE_BRAND_ID!=='asfour'||ASFOUR_REFERENCE_FILTER==='all'||
    (ASFOUR_REFERENCE_FILTER==='information'?isAsfourInformationPage(x):!isAsfourInformationPage(x)))&&
