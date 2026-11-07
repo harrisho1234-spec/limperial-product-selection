@@ -790,8 +790,9 @@ async function exportTeamExcel(withCost=false){
      (rejectedCount?'<span class="team-review-count team-review-count-rejected">✕ '+rejectedCount+' rejected</span>':'')+
      (pending?'<span class="team-review-count team-review-count-pending">'+pending+' pending</span>':'')+
      '</span>';
-   const open=TEAM_DUP_OPEN.has(group.key)?TEAM_DUP_OPEN.get(group.key):different.length>0;
    const duplicateReview=duplicateReviewMarkup(group);
+   const unreviewedDuplicateCount=teamExactDuplicateClusters(group.records).filter(c=>!c.every(r=>r.entry?.duplicateKeepSeparate===true)).length;
+   const open=TEAM_DUP_OPEN.has(group.key)?TEAM_DUP_OPEN.get(group.key):different.length>0||unreviewedDuplicateCount>0;
    const differenceLabels=different.map(f=>f.label).join(', ');
    // A shared product code is a family of submissions, not proof of duplicates.
    // Different dimensions, requested sizes, finish or crystal are valid variants.
@@ -817,6 +818,7 @@ async function exportTeamExcel(withCost=false){
      '<summary class="team-duplicate-summary"><div class="team-duplicate-photo">'+img+'</div>'+
      '<span class="team-duplicate-title"><b>'+esc(brand)+' · '+esc(group.code)+'</b>'+
      '<span>'+(hasVariations?variationCount+' product variations':group.records.length+' team submissions')+' · '+pending+' awaiting review</span>'+reviewCounts+
+     (unreviewedDuplicateCount?'<span class="team-dup-summary-warning">! '+unreviewedDuplicateCount+' possible repeated selection'+(unreviewedDuplicateCount===1?'':'s')+'</span>':'')+
      '<span class="'+(different.length?'team-dup-different':'team-dup-identical')+'">'+note+'</span></span>'+
      '<span class="team-duplicate-expand">'+(open?'Review entries':'Open entries')+'</span></summary>'+
      '<div class="team-duplicate-body">'+duplicateReview+compare+
