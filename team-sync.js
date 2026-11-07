@@ -293,6 +293,15 @@ async function onSupabaseIdentity(identity){
  function snapshot(kind,id){if(!PACK)return null;const item=kind==='catalog'?catalogItemForSelection(id):allVariants().find(x=>x.id===id);if(!item)return null;const entry=kind==='catalog'?candidateEntry(item):variantEntry(item);
   return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,code:item.code||'',name:typeof cleanAsfourProductName==='function'?cleanAsfourProductName(item.name||item.type||'',item.source,ACTIVE_BRAND_ID):(item.name||item.type||''),type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:item.sprite?.atlas?item.sprite.atlas+'#'+item.sprite.index:(item.sourceRef||'')},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
  async function publish(kind,id){if(!token||!email)return;const data=snapshot(kind,id);if(!data)return;if(!hasRole()&&(data.entry.decision==='Approved'||data.entry.supplierStatus==='Confirmed')){lastError='Only management can approve or confirm products for the team.';status='error';paint();return}
+  // Prevent accidental repeat submissions by the same staff member.
+  if(!records.some(r=>r.recordId===data.recordId&&!r.deleted)){
+    const proposed={...data,ownerEmail:email,code:data.item?.code||data.entry?.code||'',name:data.item?.name||'',dimension:data.item?.dimension||''};
+    const signature=teamExactDuplicateSignature(proposed);
+    const existing=signature&&records.find(r=>!r.deleted&&r.recordId!==data.recordId&&teamExactDuplicateSignature(r)===signature);
+    if(existing&&!confirm('Possible repeated selection for '+(data.item?.code||data.itemId)+
+      ' under your name.\nExisting quantity: '+existing.qty+
+      '.\nCancel to update your existing selection quantity (or ask an Admin).\nOK to keep this as a separate submission.'))return;
+  }
   pending++;try{const response=await call('upsert',data);versions.set(response.recordId,response.revision);status='connected';lastError='';await refresh();paint()}catch(err){status='error';lastError=err.message+' — local copy preserved';paint()}finally{pending--}}
  function itemChanged(kind,id){if(!token)return;publish(kind,id).catch(err=>{lastError=err.message;status='error';paint()})}
  async function itemRemoved(kind,id){if(!token)return;const recordKey=recordId(kind,id),version=versions.get(recordKey);if(!version)return;try{await call('remove',{recordId:recordKey,expectedRevision:version});await refresh();paint()}catch(err){status='error';lastError=err.message;paint()}}
@@ -654,6 +663,113 @@ async function exportTeamExcel(withCost=false){
      (compact?' team-review-badge-compact':'')+'" aria-label="Review status: '+decision+'">'+
      '<span aria-hidden="true">'+(approved?'✓':'✕')+'</span> '+decision+'</span>';
  }
+
+ const TEAM_DUP_CANDIDATES=new Map();
+ function teamExactDuplicateSignature(record){
+  const entry=record.entry||{},item=record.item||{};
+  const norm=value=>String(value??'').trim().replace(/\s+/g,' ').toLowerCase();
+  const code=teamCodeKey(record);
+  if(!code)return '';
+  return JSON.stringify([
+    norm(record.brandId),code,norm(record.ownerEmail),
+    norm(record.name||item.name),norm(record.dimension||entry.originalSize),
+    norm(entry.targetSize),norm(entry.finish),norm(entry.crystal),norm(entry.request||record.notes)
+  ]);
+ }
+ function teamExactDuplicateClusters(rows){
+  const map=new Map();
+  for(const record of rows){
+   const key=teamExactDuplicateSignature(record);if(!key)continue;
+   if(!map.has(key))map.set(key,[]);
+   map.get(key).push(record);
+  }
+  return [...map.values()].filter(group=>group.length>1);
+ }
+ function duplicateReviewMarkup(group){
+  const clusters=teamExactDuplicateClusters(group.records);
+  if(!clusters.length)return '';
+  return '<div class="team-dup-review-box"><h4>Possible duplicate selections</h4>'+
+   '<p class="tiny">Only identical specifications from the same staff member are flagged. Different sizes or staff members stay separate.</p>'+
+   clusters.map((cluster,index)=>{
+     const key=group.key+'::'+index;
+     TEAM_DUP_CANDIDATES.set(key,cluster.map(r=>({recordId:r.recordId,expectedRevision:r.revision})));
+     const approved=cluster.filter(r=>r.decision==='Approved').length;
+     const recordedQty=cluster.reduce((n,r)=>n+(Number(r.qty)||0),0);
+     const allSeparate=cluster.every(r=>r.entry?.duplicateKeepSeparate===true);
+     const sameStatus=cluster.every(r=>r.decision===cluster[0].decision && r.supplierStatus===cluster[0].supplierStatus);
+     const label=teamOwnerName(cluster[0])+' · '+cluster.length+' entries · recorded qty '+recordedQty;
+     const safeKey=esc(key);
+     const actions=['Super Admin','Admin'].includes(role)&&!allSeparate?
+       '<div class="team-dup-review-actions">'+
+        (sameStatus?'<button type="button" class="btn small" data-sync-action="mergeExactDuplicates" data-duplicate-key="'+safeKey+'">Merge entries…</button>':
+         '<span class="tiny">Mixed decisions: review each status before merging.</span>')+
+        '<button type="button" class="btn secondary small" data-sync-action="keepDuplicatesSeparate" data-duplicate-key="'+safeKey+'">Keep separate</button>'+
+       '</div>':'';
+     return '<div class="team-dup-review-entry">'+
+       '<span class="team-dup-review-description">'+
+         (allSeparate?'<span class="team-dup-reviewed-label">✓ Kept separate</span>':'<span class="team-dup-alert-label">! Possible repeat</span>')+
+         '<b>'+esc(label)+'</b>'+
+         '<small>'+approved+' approved; no quantities changed automatically</small>'+
+       '</span>'+actions+'</div>';
+   }).join('')+'</div>';
+ }
+ async function editTeamQuantity(recordId){
+  if(!['Super Admin','Admin'].includes(role))return;
+  const r=records.find(x=>x.recordId===recordId&&!x.deleted);if(!r)return;
+  const value=prompt('Edit Team Selection quantity for '+(r.code||r.name||'product')+
+    ' · '+teamOwnerName(r)+'\nCurrent qty: '+r.qty+'\nEnter the new TOTAL quantity (whole number 0–9999):',String(r.qty));
+  if(value===null)return;
+  if(!/^\d{1,4}$/.test(value.trim())||Number(value)>9999){alert('Enter a whole number from 0 to 9999.');return}
+  const newQty=Number(value);
+  if(newQty===Number(r.qty))return;
+  const reason=prompt('Reason for changing quantity (recorded in the private audit history):','Correction after review');
+  if(reason===null)return;
+  if(reason.trim().length<3){alert('Please provide a reason of at least 3 characters.');return}
+  if(!confirm('Change '+(r.code||r.name)+' quantity from '+r.qty+' to '+newQty+
+   '?\nDecision remains '+r.decision+'.\nOwner remains '+teamOwnerName(r)+'.'))return;
+  try{
+    await call('editTeamQty',{recordId:r.recordId,expectedRevision:r.revision,qty:newQty,reason:reason.trim()});
+    await refresh();status='connected';lastError='';paint();
+  }catch(error){lastError='Unable to edit Team quantity: '+error.message;status='error';paint()}
+ }
+ async function reviewExactDuplicateGroup(key,action){
+  if(!['Super Admin','Admin'].includes(role))return;
+  const refs=TEAM_DUP_CANDIDATES.get(key);if(!refs||refs.length<2)return;
+  const chosen=refs.map(x=>records.find(r=>r.recordId===x.recordId&&!r.deleted));
+  if(chosen.some(x=>!x)){alert('Selections changed. Refresh Team Selections first.');return}
+  const owner=teamOwnerName(chosen[0]),code=chosen[0].code||'this code';
+  const allSame=chosen.every(r=>r.decision===chosen[0].decision&&r.supplierStatus===chosen[0].supplierStatus);
+  if(action==='merge'&&!allSame){alert('These submissions have different review decisions or supplier statuses. Review them separately first.');return}
+  const total=chosen.reduce((n,r)=>n+(Number(r.qty)||0),0);
+  let finalQty;
+  if(action==='merge'){
+    const value=prompt('Merge '+chosen.length+' exact matching entries for '+owner+' / '+code+'.\n'+
+      'Existing recorded total: '+total+'.\nEnter the FINAL quantity to retain.\n'+
+      'Use the intended quantity (e.g. 2 for an accidental repeat); do not automatically sum duplicates.',String(chosen[0].qty));
+    if(value===null)return;
+    if(!/^\d{1,4}$/.test(value.trim())||Number(value)>9999){alert('Enter a whole number from 0 to 9999.');return}
+    finalQty=Number(value);
+  }
+  const reason=prompt(action==='merge'?
+      'Reason for merging (preserved in the private audit):':
+      'Why are these separate orders/selections? (saved in audit):',
+      action==='merge'?'Accidental duplicate selection':'Separate projects or intended orders');
+  if(reason===null)return;
+  if(reason.trim().length<3){alert('Please enter a reason (at least 3 characters).');return}
+  if(!confirm(action==='merge'?
+    'Merge '+chosen.length+' entries for '+owner+' / '+code+'?\nRecorded total: '+total+
+    '\nFINAL quantity: '+finalQty+'\nDuplicate source rows will be archived (not permanently erased).\nApprovals will not change.':
+    'Mark '+chosen.length+' matching entries as intentionally separate?\nAll recorded quantities and approvals will stay unchanged.'))return;
+  const payload={records:refs,reason:reason.trim()};
+  try{
+    if(action==='merge'){
+      const target=[...chosen].sort((a,b)=>String(a.updatedAt||'').localeCompare(String(b.updatedAt||'')))[0];
+      await call('mergeDuplicates',{...payload,targetRecordId:target.recordId,finalQty});
+    }else await call('keepDuplicatesSeparate',payload);
+    await refresh();status='connected';lastError='';paint();
+  }catch(error){lastError='Duplicate review failed: '+error.message;status='error';paint()}
+ }
+
  function renderTeamDuplicateGroup(group,renderRow){
    const different=teamDuplicateDifferences(group),first=group.records[0];
    // Prefer any available authorized photo among the staff submissions.
@@ -675,6 +791,7 @@ async function exportTeamExcel(withCost=false){
      (pending?'<span class="team-review-count team-review-count-pending">'+pending+' pending</span>':'')+
      '</span>';
    const open=TEAM_DUP_OPEN.has(group.key)?TEAM_DUP_OPEN.get(group.key):different.length>0;
+   const duplicateReview=duplicateReviewMarkup(group);
    const differenceLabels=different.map(f=>f.label).join(', ');
    // A shared product code is a family of submissions, not proof of duplicates.
    // Different dimensions, requested sizes, finish or crystal are valid variants.
@@ -702,13 +819,14 @@ async function exportTeamExcel(withCost=false){
      '<span>'+(hasVariations?variationCount+' product variations':group.records.length+' team submissions')+' · '+pending+' awaiting review</span>'+reviewCounts+
      '<span class="'+(different.length?'team-dup-different':'team-dup-identical')+'">'+note+'</span></span>'+
      '<span class="team-duplicate-expand">'+(open?'Review entries':'Open entries')+'</span></summary>'+
-     '<div class="team-duplicate-body">'+compare+
+     '<div class="team-duplicate-body">'+duplicateReview+compare+
      '<div class="team-duplicate-records" role="list">'+group.records.map(renderRow).join('')+'</div></div></details>';
  }
 
  function rowsHTML(){
   const map=new Map(brands.map(b=>[b.id,b.name]));
   const visible=filteredTeamRecords().slice(0,200);
+  TEAM_DUP_CANDIDATES.clear();
   preloadVisibleTeamPhotos(visible);
   const header='<div class="team-list-head" aria-hidden="true"><span>Photo</span><span>Product / Supplier</span><span>Selected by</span><span>Status / Qty</span><span>Review actions</span></div>';
   const renderRow=r=>{
@@ -722,6 +840,8 @@ async function exportTeamExcel(withCost=false){
    const approve=canApprove?
     '<button class="btn small" data-sync-action="approve" data-record-id="'+esc(r.recordId)+'">Approve &amp; confirm</button>'+
     '<button class="btn danger small" data-sync-action="reject" data-record-id="'+esc(r.recordId)+'">Reject</button>':'';
+   const editQtyAction=['Super Admin','Admin'].includes(role)?
+    '<button type="button" class="btn secondary small" data-sync-action="editTeamQty" data-record-id="'+esc(r.recordId)+'">Edit Qty</button>':'';
    const importAction=canImport?
     '<button class="btn quiet small" data-sync-action="import" data-record-id="'+esc(r.recordId)+'">Use in selections</button>':'';
    const removeAction=canRemove?
@@ -758,7 +878,7 @@ async function exportTeamExcel(withCost=false){
       '<span class="team-list-qty">Qty '+esc(r.qty??'—')+'</span>'+
       (['Super Admin','Admin'].includes(role)?(window.LISelectionCosts?.rowMarkup?.(r)||''):'')+'</div>'+
      '<div class="team-list-actions">'+(approve||importAction||
-       '<span class="tiny">Reviewed</span>')+(approve&&importAction?importAction:'')+'</div>'+
+       '<span class="tiny">Reviewed</span>')+(approve&&importAction?importAction:'')+editQtyAction+'</div>'+
     '</div>'+details+'</article>';
   };
   const groups=teamDuplicateGroups(visible);
@@ -861,6 +981,9 @@ async function exportTeamExcel(withCost=false){
     .finally(()=>{userManageBusy=false;renderTeamManagement()});return;
   }
   if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(false);if(act==='exportTeamExcelWithCost')exportTeamExcel(true);
+  if(act==='editTeamQty')editTeamQuantity(b.dataset.recordId);
+  if(act==='mergeExactDuplicates')reviewExactDuplicateGroup(b.dataset.duplicateKey,'merge');
+  if(act==='keepDuplicatesSeparate')reviewExactDuplicateGroup(b.dataset.duplicateKey,'separate');
   if(act==='toggleTeamCosts'&&['Super Admin','Admin'].includes(role))window.LISelectionCosts?.toggle?.(filteredTeamRecords(),paint).catch(err=>alert(err.message));
   if(act==='setCost'&&['Super Admin','Admin'].includes(role)){const target=records.find(x=>x.recordId===b.dataset.recordId);if(target)window.LISelectionCosts?.setForRecord?.(target,paint).catch(err=>alert(err.message))}if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){window.LISelectionCosts?.signOut?.().catch(err=>console.warn('Supabase logout:',err));disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
