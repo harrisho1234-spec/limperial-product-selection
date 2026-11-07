@@ -31,8 +31,53 @@ let PACK=null,ACTIVE_PACK=null,DB=null,SPRITES={},VIEW='discover',SEARCH='',SRC=
 let ASFOUR_REFERENCE_FILTER='products';
 let TL_CATALOG_VIEW='products';
 let S=readState();
-function readState(){try{return Object.assign({family:{},variants:{},catalog:{},shortlist:[],manual:[],compare:[]},JSON.parse(localStorage.getItem(stateKey(ACTIVE_BRAND_ID))||'{}'))}catch(e){return {family:{},variants:{},catalog:{},shortlist:[],manual:[],compare:[]}}}
+function readState(){const d={family:{},variants:{},catalog:{},shortlist:[],manual:[],compare:[],selectionRounds:[{id:'round-1',name:'1st Selection'}],activeRoundId:'round-1'};try{return Object.assign(d,JSON.parse(localStorage.getItem(stateKey(ACTIVE_BRAND_ID))||'{}'))}catch(e){return d}}
 function save(){localStorage.setItem(stateKey(ACTIVE_BRAND_ID),JSON.stringify(S)); updateBadges();window.LITeamSync?.localSaved()}
+
+function selectionRounds(){
+ const list=Array.isArray(S.selectionRounds)?S.selectionRounds.filter(x=>x&&typeof x.id==='string'&&typeof x.name==='string'):[];
+ if(!list.some(x=>x.id==='round-1'))list.unshift({id:'round-1',name:'1st Selection'});
+ return list;
+}
+function chosenRoundId(){
+ const id=String(S.activeRoundId||'round-1');
+ return id==='all'||selectionRounds().some(x=>x.id===id)?id:'round-1';
+}
+function entryRoundId(entry){
+ const id=String(entry?.roundId||'round-1');
+ return selectionRounds().some(x=>x.id===id)?id:'round-1';
+}
+function roundName(id){return selectionRounds().find(r=>r.id===id)?.name||'1st Selection'}
+function ordinal(n){const k=n%100;return n+(k>=11&&k<=13?'th':n%10===1?'st':n%10===2?'nd':n%10===3?'rd':'th')}
+function roundOptions(selected){return selectionRounds().map(r=>'<option value="'+q(r.id)+'" '+(r.id===selected?'selected':'')+'>'+q(r.name)+'</option>').join('')}
+function selectionRoundsBar(){
+ const current=chosenRoundId(),selected=allVariants().filter(v=>['Select','Approved'].includes(variantEntry(v).decision));
+ const total=candidates().length+selected.length;
+ return '<div class="selection-rounds-bar"><label class="selection-rounds-label" for="selectionRoundsActive">Selection group</label>'+
+  '<select id="selectionRoundsActive" aria-label="Current selection group"><option value="all" '+(current==='all'?'selected':'')+'>All selections ('+total+')</option>'+
+  selectionRounds().map(r=>{const count=candidates().filter(i=>entryRoundId(candidateEntry(i))===r.id).length+
+    selected.filter(v=>entryRoundId(variantEntry(v))===r.id).length;
+    return '<option value="'+q(r.id)+'" '+(current===r.id?'selected':'')+'>'+q(r.name)+' ('+count+')</option>'}).join('')+
+  '</select><button type="button" class="btn secondary small" data-action="newSelectionRound">＋ New group</button>'+
+  (current!=='all'?'<button type="button" class="btn quiet small" data-action="renameSelectionRound">Rename</button>':'')+
+  '<span class="tiny">New products go to '+q(roundName(current==='all'?'round-1':current))+'. Previous selections stay in their groups.</span></div>';
+}
+function createSelectionRound(){
+ const rounds=selectionRounds();if(rounds.length>=30)return alert('A maximum of 30 selection groups is supported.');
+ const input=prompt('Name the new selection group:',ordinal(rounds.length+1)+' Selection');
+ if(input===null)return;
+ const name=input.trim().slice(0,60);if(!name)return alert('Please enter a name.');
+ let id;do{id='round-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,7)}while(rounds.some(r=>r.id===id));
+ S.selectionRounds=[...rounds,{id,name}];S.activeRoundId=id;save();render();toast('Created '+name);
+}
+function renameSelectionRound(){
+ const id=chosenRoundId();if(id==='all')return;
+ const rounds=selectionRounds(),old=rounds.find(x=>x.id===id);if(!old)return;
+ const input=prompt('Rename selection group:',old.name);if(input===null)return;
+ const name=input.trim().slice(0,60);if(!name)return alert('Please enter a name.');
+ S.selectionRounds=rounds.map(r=>r.id===id?{...r,name}:r);save();render();toast('Renamed to '+name);
+}
+
 function toast(msg){let e=$('toast');e.textContent=msg;e.classList.add('show');clearTimeout(toast.t);toast.t=setTimeout(()=>e.classList.remove('show'),3000)}
 function sprite(s,extra='',urlMap=SPRITES){if(s?.data&&/^data:image\/(webp|png|jpeg);base64,/.test(s.data))return `<div class="sprite" style="background-image:url('${s.data}');background-size:contain;background-position:center;background-repeat:no-repeat" ${extra}></div>`;if(!s||!urlMap[s.atlas])return `<div class="sprite" style="display:grid;place-items:center;color:#b7a37e;font-size:35px">✧</div>`;const x=(s.index%4)*100/3,y=Math.floor(s.index/4)*100/3;const crop=window.LICatalogSplit?.image(s);if(crop){const left=crop.col/crop.cols*100,top=crop.row/crop.rows*100;return `<div class="catalog-crop-window" style="--li-crop-aspect:${crop.rows/crop.cols}"><div class="sprite catalog-crop-source" style="width:${crop.cols*100}%;height:${crop.rows*100}%;transform:translate(-${left}%,-${top}%);background-image:url('${urlMap[s.atlas]}');background-position:${x}% ${y}%" ${extra}></div></div>`}return `<div class="sprite" style="background-image:url('${urlMap[s.atlas]}');background-position:${x}% ${y}%" ${extra}></div>`}
 function photo(s,cl='preview',urlMap=SPRITES){return `<div class="${cl}">${sprite(s,'',urlMap)}</div>`}
@@ -89,7 +134,7 @@ function catalogItemForSelection(id){
 }
 function candidateEntry(item){
  const entry=selectionForItem(item.id)||{};
- const value=Object.assign({decision:'Review',supplierStatus:'Not requested',qty:0,code:item.code||'',targetSize:'',request:'',crystal:'',finish:''},entry);
+ const value=Object.assign({decision:'Review',supplierStatus:'Not requested',qty:0,code:item.code||'',targetSize:'',request:'',crystal:'',finish:'',roundId:'round-1'},entry);
  if(String(value.targetSize||'').trim()===String(item.dimension||'').trim())value.targetSize='';
  return value;
 }
@@ -101,7 +146,7 @@ function duplicateCatalogSelection(id){
  do{copyId='copy-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9)}
  while(S.catalogDuplicates[copyId]||S.catalog[copyId]||PACK.items.some(x=>x.id===copyId));
  const from=candidateEntry(item);
- S.catalogDuplicates[copyId]={...from,sourceItemId:item.sourceItemId||item.id,decision:'Select',supplierStatus:'Not requested',targetSize:'',qty:Number(from.qty)>0?Number(from.qty):1};
+ S.catalogDuplicates[copyId]={...from,roundId:chosenRoundId()==='all'?'round-1':chosenRoundId(),sourceItemId:item.sourceItemId||item.id,decision:'Select',supplierStatus:'Not requested',targetSize:'',qty:Number(from.qty)>0?Number(from.qty):1};
  save();
  window.LITeamSync?.itemChanged('catalog',copyId);
  if(MODAL?.type==='item')closeDrawer();
@@ -564,7 +609,7 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
   keepViewport();
   requestAnimationFrame(keepViewport);
   break;
-}case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'item':itemDrawer(id);break;case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{if(ACTIVE_BRAND_ID==='tl'&&PACK?.items?.some(x=>x.id===id&&(x.tlPageReference||(x.source==='tl-chandelier'&&!x.code)))){toast('Original pages are references. Select an individual model in Discover.');break}if(!selectionForItem(id)&&!S.shortlist.includes(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}S.catalog[id]={...candidateEntry(item),decision:'Select',qty:1};if(!S.shortlist.includes(id))S.shortlist.push(id)}else{
+}case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'item':itemDrawer(id);break;case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{if(ACTIVE_BRAND_ID==='tl'&&PACK?.items?.some(x=>x.id===id&&(x.tlPageReference||(x.source==='tl-chandelier'&&!x.code)))){toast('Original pages are references. Select an individual model in Discover.');break}if(!selectionForItem(id)&&!S.shortlist.includes(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}S.catalog[id]={...candidateEntry(item),decision:'Select',qty:1,roundId:chosenRoundId()==='all'?'round-1':chosenRoundId()};if(!S.shortlist.includes(id))S.shortlist.push(id)}else{
  const entry=selectionForItem(id);
  const isReviewed=entry?.decision==='Approved'||entry?.supplierStatus==='Confirmed';
  const item=catalogItemForSelection(id);
