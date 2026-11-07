@@ -524,6 +524,128 @@ async function onSupabaseIdentity(identity){
    if(direction==='down'&&at<group.length-1)return placeTeamRecord(id,teamRecordRound(record),group[at+2]?.recordId||'');
  }
 
+
+ // Copy a manager's personal selection rounds into the shared Team Review using
+ // exact brand/kind/item IDs. This never imports, deletes or merges records and
+ // never calls upsert(), which could overwrite an approved staff selection.
+ function localRoundPlansForTeam(){
+  const personal=Array.isArray(S.selectionRounds)?S.selectionRounds:[];
+  const nameFor=id=>{
+    const name=personal.find(r=>r.id===id)?.name||
+      sharedRounds.find(r=>r.brandId===ACTIVE_BRAND_ID&&r.id===id)?.name||
+      (id==='round-1'?'1st Selection':'');
+    return String(name||'').trim();
+  };
+  const norm=x=>String(x??'').trim().toLowerCase().replace(/\\s+/g,' ');
+  const ownByKey=new Map();
+  let ambiguous=0;
+  const addLocal=(kind,id,entry)=>{
+    if(!entry||entry.decision==='Skip'||entry.decision==='Rejected')return;
+    const roundId=String(entry.roundId||'round-1');
+    const groupName=nameFor(roundId);
+    if(!groupName)return;
+    const key=kind+'|'+id;
+    const spec={targetSize:norm(entry.targetSize),finish:norm(entry.finish),crystal:norm(entry.crystal)};
+    const prev=ownByKey.get(key);
+    if(prev&&prev.roundId!==roundId){ownByKey.set(key,{ambiguous:true});ambiguous++;return}
+    if(!prev)ownByKey.set(key,{roundId,groupName,spec});
+  };
+  Object.entries(S.catalog||{}).forEach(([id,entry])=>addLocal('catalog',id,entry));
+  Object.entries(S.catalogDuplicates||{}).forEach(([id,entry])=>addLocal('catalog',id,entry));
+  Object.entries(S.variants||{}).forEach(([id,entry])=>{
+    if(['Select','Approved'].includes(entry?.decision))addLocal('variant',id,entry)
+  });
+  const matchSpec=(entry,record)=>{
+    // Normal catalog sizes may be saved as targetSize by Apps Script even when
+    // no customization was requested. Ignore this implied original dimension.
+    const original=norm(record.dimension||record.item?.dimension);
+    const incoming=norm(record.entry?.targetSize||record.targetSize);
+    const actualSize=incoming===original?'':incoming;
+    const ownSize=entry.spec.targetSize===original?'':entry.spec.targetSize;
+    const finish=norm(record.entry?.finish||record.finish);
+    const crystal=norm(record.entry?.crystal||record.crystal);
+    return actualSize===ownSize&&finish===entry.spec.finish&&crystal===entry.spec.crystal;
+  };
+  const matches=[],skipped={unmatched:0,ambiguous,details:0};
+  for(const record of records){
+    if(record.deleted||record.brandId!==ACTIVE_BRAND_ID)continue;
+    const local=ownByKey.get(record.kind+'|'+record.itemId);
+    if(!local){skipped.unmatched++;continue}
+    if(local.ambiguous){skipped.ambiguous++;continue}
+    if(!matchSpec(local,record)){skipped.details++;continue}
+    matches.push({recordId:record.recordId,roundId:local.roundId,groupName:local.groupName});
+  }
+  return {matches,skipped};
+ }
+ async function applyMyGroupsToTeam(){
+  if(roundsBusy||!teamRoundsAvailable()||!['Super Admin','Admin'].includes(role))return;
+  if(teamBrandFilter==='all'||teamBrandFilter!==ACTIVE_BRAND_ID)
+    return alert('Select the same supplier in Brands and Team Selections first. Only that supplier will be synchronized.');
+  const plan=localRoundPlansForTeam();
+  if(!plan.matches.length)return alert('No matching published Team selections were found for your current My Selections. No records changed. To arrange other items, use Arrange products.');
+  const names=[...new Set(plan.matches.map(m=>m.groupName))];
+  const needs=names.filter(name=>!sharedRounds.some(r=>
+     r.brandId===ACTIVE_BRAND_ID&&r.name.trim().toLowerCase()===name.toLowerCase()));
+  const summary=names.map(name=>name+': '+plan.matches.filter(m=>m.groupName===name).length).join('\\n');
+  const confirmText='Apply My Selections groups to matching '+brandNow().name+' Team selections?\\n\\n'+
+    summary+'\\n\\n'+
+    (needs.length?'New shared groups: '+needs.join(', ')+'\\n':'')+
+    'Only exact product ID and matching specifications are included.\\n'+
+    'No new products are submitted, and no quantities, approvals or ownership change.\\n'+
+    'This may reorganize submissions made by other staff.\\n'+
+    (plan.skipped.details+plan.skipped.ambiguous?'Skipped ambiguous/specification matches: '+(plan.skipped.details+plan.skipped.ambiguous)+'\\n':'')+
+    'Proceed?';
+  if(!confirm(confirmText))return;
+  roundsBusy=true;
+  const button=document.querySelector('[data-sync-action="applyMyGroupsToTeam"]');
+  if(button){button.disabled=true;button.textContent='Syncing selection groups…'}
+  let moved=0,already=0,failed=0,created=0;
+  const errors=[];
+  try{
+    // Create only groups used by records that actually match the current team.
+    // Keep the first round's canonical ID instead of creating a duplicate.
+    for(const name of needs){
+      if(name.toLowerCase()==='1st selection')continue;
+      try{
+        await call('manageTeamRound',{action:'create',brandId:ACTIVE_BRAND_ID,name});
+        created++;
+        await refresh();
+      }catch(e){failed++;errors.push('Group '+name+': '+e.message)}
+    }
+    // Each placement may renumber several records and increment revisions;
+    // refresh after EVERY move to avoid overwriting concurrent staff edits.
+    for(const desired of plan.matches){
+      const record=records.find(r=>r.recordId===desired.recordId&&!r.deleted);
+      if(!record){failed++;continue}
+      const target=sharedRounds.find(r=>
+        r.brandId===ACTIVE_BRAND_ID&&
+        (r.id===desired.roundId||r.name.trim().toLowerCase()===desired.groupName.toLowerCase()));
+      if(!target){failed++;continue}
+      if(teamRecordRound(record)===target.id){already++;continue}
+      try{
+        await call('placeTeamSelection',{recordId:record.recordId,
+          expectedRevision:record.revision,roundId:target.id});
+        moved++;
+        await refresh();
+        if(button)button.textContent='Applied '+moved+' group moves…';
+      }catch(e){
+        failed++;errors.push(String(e.message||e));
+        try{await refresh()}catch(_){}
+      }
+    }
+    status=failed?'error':'connected';
+    lastError=failed?'Some selections could not be grouped; refresh and review.':'';
+  }catch(e){failed++;errors.push(e.message)}
+  finally{
+    roundsBusy=false;
+    await refresh().catch(()=>{});
+    paint();
+    alert('Team selection groups updated for '+brandNow().name+'.\\n'+
+      moved+' moved; '+already+' already grouped; '+created+' shared groups created; '+failed+' failed.\\n'+
+      (errors.length?'Issues: '+errors.slice(0,3).join('; '):'All matched changes preserved quantities and approvals.'));
+  }
+ }
+
  function filteredTeamRecords(){
   return records.filter(r=>!r.deleted&&(teamBrandFilter==='all'||String(r.brandId)===teamBrandFilter)&&
     (!teamRoundsAvailable()||teamRoundFilter==='all'||roundKey(r)===teamRoundFilter))
@@ -721,7 +843,9 @@ async function exportTeamExcel(withCost=false){
    (teamRoundsAvailable()&&['Super Admin','Admin'].includes(role)?
      '<button type="button" class="btn secondary small" data-sync-action="createTeamRound"'+(teamBrandFilter==='all'||roundsBusy?' disabled':'')+'>＋ New group</button>'+
      '<button type="button" class="btn quiet small" data-sync-action="renameTeamRound"'+(teamRoundFilter==='all'||roundsBusy?' disabled':'')+'>Rename group</button>'+
-     '<button type="button" class="btn secondary small" data-sync-action="toggleTeamOrganize">'+(organizeTeamRounds?'✓ Finish arranging':'↕ Arrange products')+'</button>':'')+
+     '<button type="button" class="btn secondary small" data-sync-action="toggleTeamOrganize">'+(organizeTeamRounds?'✓ Finish arranging':'↕ Arrange products')+'</button>'+
+     '<button type="button" class="btn secondary small" data-sync-action="applyMyGroupsToTeam"'+(roundsBusy||teamBrandFilter==='all'||teamBrandFilter!==ACTIVE_BRAND_ID?' disabled':'')+
+     ' title="Apply this browser\'s My Selections group assignments to matching published Team submissions">↪ Apply My Groups</button>':'')+
    (['Super Admin','Admin'].includes(role)?
      '<details class="li-export-choice"><summary class="btn secondary small"'+(!filtered?' aria-disabled="true"':'')+'>⬇ Export '+esc(teamExportLabel())+' ('+filtered+') ▾</summary>'+
      '<div class="li-export-menu"><button type="button" class="btn quiet small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>Without Cost</button>'+
@@ -1144,6 +1268,7 @@ async function exportTeamExcel(withCost=false){
     .finally(()=>{userManageBusy=false;renderTeamManagement()});return;
   }
   if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(false);if(act==='exportTeamExcelWithCost')exportTeamExcel(true);
+  if(act==='applyMyGroupsToTeam')applyMyGroupsToTeam();
   if(act==='createTeamRound')newSharedTeamRound();
   if(act==='renameTeamRound')renameSharedTeamRound();
   if(act==='toggleTeamOrganize'){organizeTeamRounds=!organizeTeamRounds;paint()}
