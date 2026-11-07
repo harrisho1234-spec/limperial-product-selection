@@ -303,6 +303,33 @@ body.li-auth-unlocked .li-auth-gate{display:none}
  .team-dup-table th,.team-dup-table td{padding:7px 9px;min-width:110px}
 }
 
+/* Team review: immediately recognizable, persistent approval/rejection indicators. */
+.team-list-row.team-list-row-approved{background:#f5fcf7;border-color:#b9ddc3;border-left:4px solid #318256}
+.team-list-row.team-list-row-rejected{background:#fff8f6;border-color:#ecc8c3;border-left:4px solid #b94c43}
+.team-duplicate-records .team-list-row.team-list-row-approved{border-color:#b9ddc3;border-left-color:#318256}
+.team-duplicate-records .team-list-row.team-list-row-rejected{border-color:#ecc8c3;border-left-color:#b94c43}
+.team-review-badge{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;
+ padding:5px 9px;border-radius:7px;border:1px solid transparent;font-size:11px;
+ font-weight:800;line-height:1.2;white-space:nowrap}
+.team-review-badge>span{font-size:13px;font-weight:900;line-height:1}
+.team-review-approved{color:#176039;background:#e1f3e8;border-color:#b5dcc4}
+.team-review-rejected{color:#a32f2e;background:#ffe7e3;border-color:#efb7ae}
+.team-review-badge-compact{font-size:10px;padding:3px 7px}
+.team-review-badge-compact>span{font-size:11px}
+.team-review-summary{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px}
+.team-duplicate-title>.team-review-summary{font-size:10px}
+.team-review-count{display:inline-flex;align-items:center;padding:4px 8px;
+ border-radius:20px;border:1px solid #e6e2dc;font-size:10px;font-weight:750;line-height:1.15}
+.team-review-count-approved{background:#e1f3e8;color:#176039;border-color:#b5dcc4}
+.team-review-count-rejected{background:#ffe7e3;color:#a32f2e;border-color:#efb7ae}
+.team-review-count-pending{background:#fff1d7;color:#805715;border-color:#ead4ac}
+.team-review-pending-label{color:#805715;font-weight:650;font-size:10px}
+.team-dup-table .team-review-badge{max-width:100%}
+@media(max-width:650px){
+ .team-review-badge{font-size:10px;padding:4px 7px}
+ .team-review-count{font-size:9px;padding:3px 6px}
+}
+
 /* TL individual chandelier picker: crop one model from a multi-product scan. */
 .tl-picker-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start}
 .tl-picker-grid>div{min-width:0}
