@@ -427,3 +427,28 @@ body.li-auth-unlocked .li-auth-gate{display:none}
 .li-cost-row{font-size:11px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:#4a5d74;padding-top:5px}
 .li-cost-row .btn{font-size:10px;padding:4px 7px}
 @media(max-width:620px){.li-export-menu{right:auto;left:0}.li-cost-card{padding:18px}}
+
+
+/* Per-brand selection rounds: separate first/second/third purchasing passes. */
+.selection-rounds-bar{display:flex;align-items:center;flex-wrap:wrap;gap:10px;
+ padding:12px 14px;margin:12px 0 16px;background:#f8f6f2;border:1px solid #e7dfd2;
+ border-radius:11px}
+.selection-rounds-label{font-weight:800;font-size:12px;color:#273a54}
+.selection-rounds-bar select{max-width:235px;min-width:160px;border:1px solid #d9d6ce;
+ border-radius:8px;padding:8px 10px;background:#fff;color:#17263c;font-size:12px}
+.selection-rounds-bar>.tiny{flex-basis:100%;line-height:1.45;color:#657181}
+.selection-round-section{margin:20px 0 28px;padding-bottom:10px}
+.selection-round-section+.selection-round-section{border-top:1px solid #e8e3da;padding-top:18px}
+.selection-round-heading{display:flex;gap:10px;align-items:baseline;justify-content:space-between;
+ flex-wrap:wrap;margin:0 0 12px;padding:10px 12px;border-left:3px solid #bc965a;
+ background:#f7f3ec;border-radius:5px}
+.selection-round-heading h2{margin:0;font-size:18px;color:#1c3048}
+.selection-round-item-label{display:inline-flex;align-items:center;gap:6px;
+ color:#5a6880;font-size:11px;font-weight:700}
+.selection-round-item-label select{font-size:11px;padding:6px 8px;border:1px solid #dedbd4;
+ border-radius:7px;max-width:185px;background:#fff;color:#24374f}
+@media(max-width:650px){.selection-rounds-bar{padding:10px;gap:7px}
+ .selection-rounds-bar select{flex:1;min-width:130px}
+ .selection-rounds-bar button{font-size:11px;padding:6px 9px}
+ .selection-round-heading h2{font-size:16px}
+ .selection-round-item-label{flex-wrap:wrap}}
