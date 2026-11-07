@@ -674,7 +674,11 @@ async function exportTeamExcel(withCost=false){
   return '<div class="team-brand-toolbar"><label for="liTeamBrandFilter">Brand</label>'+
    '<select id="liTeamBrandFilter" aria-label="Filter team selections by brand">'+
    '<option value="all"'+(teamBrandFilter==='all'?' selected':'')+'>All brands ('+all+')</option>'+
-   options+'</select>'+
+   options+'</select>'+roundFilterOptions()+
+   (teamRoundsAvailable()&&['Super Admin','Admin'].includes(role)?
+     '<button type="button" class="btn secondary small" data-sync-action="createTeamRound"'+(teamBrandFilter==='all'||roundsBusy?' disabled':'')+'>＋ New group</button>'+
+     '<button type="button" class="btn quiet small" data-sync-action="renameTeamRound"'+(teamRoundFilter==='all'||teamRoundFilter.endsWith('::round-1')||roundsBusy?' disabled':'')+'>Rename group</button>'+
+     '<button type="button" class="btn secondary small" data-sync-action="toggleTeamOrganize">'+(organizeTeamRounds?'✓ Finish arranging':'↕ Arrange products')+'</button>':'')+
    (['Super Admin','Admin'].includes(role)?
      '<details class="li-export-choice"><summary class="btn secondary small"'+(!filtered?' aria-disabled="true"':'')+'>⬇ Export Excel ▾</summary>'+
      '<div class="li-export-menu"><button type="button" class="btn quiet small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>Without Cost</button>'+
@@ -925,6 +929,15 @@ async function exportTeamExcel(withCost=false){
    const approve=canApprove?
     '<button class="btn small" data-sync-action="approve" data-record-id="'+esc(r.recordId)+'">Approve &amp; confirm</button>'+
     '<button class="btn danger small" data-sync-action="reject" data-record-id="'+esc(r.recordId)+'">Reject</button>':'';
+   const canArrange=['Super Admin','Admin'].includes(role)&&teamRoundsAvailable();
+   const itemRound=teamRecordRound(r);
+   const arrangeActions=canArrange&&organizeTeamRounds?
+     '<div class="team-arrange-item"><label>Group <select data-team-move-round="'+esc(r.recordId)+'" aria-label="Move selection to group">'+
+     sharedRounds.filter(x=>x.brandId===r.brandId).sort((a,b)=>a.order-b.order).map(g=>
+       '<option value="'+esc(g.id)+'"'+(g.id===itemRound?' selected':'')+'>'+esc(g.name)+'</option>').join('')+
+     '</select></label><span class="team-arrange-arrows">'+
+     '<button type="button" class="btn quiet small" data-sync-action="teamMoveUp" data-record-id="'+esc(r.recordId)+'" aria-label="Move earlier">↑</button>'+
+     '<button type="button" class="btn quiet small" data-sync-action="teamMoveDown" data-record-id="'+esc(r.recordId)+'" aria-label="Move later">↓</button></span></div>':'';
    const editQtyAction=['Super Admin','Admin'].includes(role)&&serverFeatures.teamQtyEdit===true?
     '<button type="button" class="btn secondary small" data-sync-action="editTeamQty" data-record-id="'+esc(r.recordId)+'">Edit Qty</button>':'';
    const importAction=canImport?
@@ -948,7 +961,9 @@ async function exportTeamExcel(withCost=false){
     (specInfo?'<div class="team-list-request-details">'+specInfo+'</div>':'')+
     (removeAction?'<div class="row-actions">'+removeAction+'</div>':'')+
     '</div></details>';
-   return '<article class="team-list-row'+rowDecisionClass+'" role="listitem">'+
+   return '<article class="team-list-row'+rowDecisionClass+'" role="listitem" data-team-record="'+esc(r.recordId)+'"'+
+    (canArrange&&organizeTeamRounds?' draggable="true" title="Drag to reorder selection items"':'')+'>'+
+    (teamRoundsAvailable()?'<div class="team-row-round-name">'+esc(teamRoundName(r.brandId,itemRound))+'</div>':'')+
     '<div class="team-list-top">'+
      '<div class="team-list-photo" title="Product preview from authorized supplier catalog">'+img+'</div>'+
      '<div class="team-list-product"><div class="tiny">'+esc(brand)+' · '+esc(r.kind)+'</div>'+
@@ -963,13 +978,22 @@ async function exportTeamExcel(withCost=false){
       '<span class="team-list-qty">Qty '+esc(r.qty??'—')+'</span>'+
       (['Super Admin','Admin'].includes(role)?(window.LISelectionCosts?.rowMarkup?.(r)||''):'')+'</div>'+
      '<div class="team-list-actions">'+(approve||importAction||
-       '<span class="tiny">Reviewed</span>')+(approve&&importAction?importAction:'')+editQtyAction+'</div>'+
+       '<span class="tiny">Reviewed</span>')+(approve&&importAction?importAction:'')+editQtyAction+arrangeActions+'</div>'+
     '</div>'+details+'</article>';
   };
-  const groups=teamDuplicateGroups(visible);
-  const rows=groups.map(group=>
-    group.records.length===1?renderRow(group.records[0]):renderTeamDuplicateGroup(group,renderRow)
-  ).join('');
+  const withRounds=teamRoundsAvailable();
+  const keys=withRounds?[...new Set(visible.map(roundKey))]:['all'];
+  const rows=keys.map(key=>{
+    const members=withRounds?visible.filter(r=>roundKey(r)===key):visible;
+    if(!members.length)return '';
+    const groupHeader=withRounds?'<div class="team-round-header"><b>'+esc(teamRoundName(members[0].brandId,teamRecordRound(members[0])))+
+      '</b><span class="tiny">'+esc(brands.find(x=>x.id===members[0].brandId)?.name||members[0].brandId)+
+      ' · '+members.length+' submission'+(members.length===1?'':'s')+'</span></div>':'';
+    if(organizeTeamRounds&&['Super Admin','Admin'].includes(role))
+      return groupHeader+members.map(renderRow).join('');
+    const groups=teamDuplicateGroups(members);
+    return groupHeader+groups.map(g=>g.records.length===1?renderRow(g.records[0]):renderTeamDuplicateGroup(g,renderRow)).join('');
+  }).join('');
   return visible.length?'<div class="team-list" role="list">'+header+rows+'</div>':
     '<div class="empty"><h3>No shared selections for this brand</h3><p>Choose All brands or another supplier, or share products from My selections.</p></div>';
  }
