@@ -7,6 +7,7 @@
  let iframe=null,bridgePopup=null,bridgePeer=null,bridgeOrigin='',bridgeNonce='',bridgeMode='iframe',signInStarted=false,ready=false,token='',email='',role='',displayName='';
  let records=[],brands=[],users=[],sharedRounds=[],serverFeatures={},lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
  let editingUserEmail='',userManageBusy=false,userManageNotice='',userManageIsError=false;
+ let groupSyncNotice=null; // Non-authentication operation result, scoped to the affected supplier.
  const TEAM_BRAND_FILTER_KEY='li-team-brand-filter-v1';
  const TEAM_ROUND_FILTER_KEY='li-team-round-filter-v1';
  let teamRoundFilter='all',organizeTeamRounds=false,roundsBusy=false,draggingTeamRecord='';
@@ -225,7 +226,7 @@ async function onSupabaseIdentity(identity){
   if(explicitSignOut&&window.google?.accounts?.id){
     try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
   }
-  window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];sharedRounds=[];serverFeatures={};versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';hasUnlockedOnce=false;paint()}
+  window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];sharedRounds=[];serverFeatures={};groupSyncNotice=null;versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';hasUnlockedOnce=false;paint()}
  function sanitizeTeamRecordPrice(record){
    if(!record||record.brandId!=='asfour')return record;
    const item=record.item||{};
@@ -580,15 +581,17 @@ async function onSupabaseIdentity(identity){
  }
  async function applyMyGroupsToTeam(){
   if(roundsBusy||!teamRoundsAvailable()||!['Super Admin','Admin'].includes(role))return;
-  if(teamBrandFilter==='all'||teamBrandFilter!==ACTIVE_BRAND_ID)
+  const syncBrandId=ACTIVE_BRAND_ID;
+  const syncBrandName=brandNow().name;
+  if(teamBrandFilter==='all'||teamBrandFilter!==syncBrandId)
     return alert('Select the same supplier in Brands and Team Selections first. Only that supplier will be synchronized.');
   const plan=localRoundPlansForTeam();
   if(!plan.matches.length)return alert('No matching published Team selections were found for your current My Selections. No records changed. To arrange other items, use Arrange products.');
   const names=[...new Set(plan.matches.map(m=>m.groupName))];
   const needs=names.filter(name=>!sharedRounds.some(r=>
-     r.brandId===ACTIVE_BRAND_ID&&r.name.trim().toLowerCase()===name.toLowerCase()));
+    r.brandId===syncBrandId&&r.name.trim().toLowerCase()===name.toLowerCase()));
   const summary=names.map(name=>name+': '+plan.matches.filter(m=>m.groupName===name).length).join('\n');
-  const confirmText='Apply My Selections groups to matching '+brandNow().name+' Team selections?\n\n'+
+  const confirmText='Apply My Selections groups to matching '+syncBrandName+' Team selections?\n\n'+
     summary+'\n\n'+
     (needs.length?'New shared groups: '+needs.join(', ')+'\n':'')+
     'Only exact product ID and matching specifications are included.\n'+
@@ -598,30 +601,36 @@ async function onSupabaseIdentity(identity){
     'Proceed?';
   if(!confirm(confirmText))return;
   roundsBusy=true;
+  groupSyncNotice=null;
   const button=document.querySelector('[data-sync-action="applyMyGroupsToTeam"]');
   if(button){button.disabled=true;button.textContent='Syncing selection groups…'}
   let moved=0,already=0,failed=0,created=0;
-  const errors=[];
+  const errors=[],failedItems=[];
+  const recordName=r=>String(r?.code||r?.entry?.code||r?.item?.code||r?.name||r?.itemId||'Unknown product').trim();
+  const noteFailure=(subject,reason)=>{
+    failed++;const detail=String(reason?.message||reason||'Unknown error');
+    failedItems.push({subject,reason:detail});
+    errors.push(subject+': '+detail);
+  };
   try{
-    // Create only groups used by records that actually match the current team.
-    // Keep the first round's canonical ID instead of creating a duplicate.
+    // Create only groups used by actual matching team records.
     for(const name of needs){
       if(name.toLowerCase()==='1st selection')continue;
       try{
-        await call('manageTeamRound',{action:'create',brandId:ACTIVE_BRAND_ID,name});
+        await call('manageTeamRound',{action:'create',brandId:syncBrandId,name});
         created++;
         await refresh();
-      }catch(e){failed++;errors.push('Group '+name+': '+e.message)}
+      }catch(e){noteFailure('Group '+name,e)}
     }
-    // Each placement may renumber several records and increment revisions;
-    // refresh after EVERY move to avoid overwriting concurrent staff edits.
+    // A backend placement may renumber several records; refresh revisions
+    // after each move to avoid overwriting staff edits.
     for(const desired of plan.matches){
       const record=records.find(r=>r.recordId===desired.recordId&&!r.deleted);
-      if(!record){failed++;continue}
+      if(!record){noteFailure(desired.recordId,'Team record no longer available');continue}
       const target=sharedRounds.find(r=>
-        r.brandId===ACTIVE_BRAND_ID&&
+        r.brandId===syncBrandId&&
         (r.id===desired.roundId||r.name.trim().toLowerCase()===desired.groupName.toLowerCase()));
-      if(!target){failed++;continue}
+      if(!target){noteFailure(recordName(record),'Destination group '+desired.groupName+' unavailable');continue}
       if(teamRecordRound(record)===target.id){already++;continue}
       try{
         await call('placeTeamSelection',{recordId:record.recordId,
@@ -630,21 +639,48 @@ async function onSupabaseIdentity(identity){
         await refresh();
         if(button)button.textContent='Applied '+moved+' group moves…';
       }catch(e){
-        failed++;errors.push(String(e.message||e));
-        try{await refresh()}catch(_){}
+        noteFailure(recordName(record),e);
+        try{await refresh()}catch(refreshError){
+          // Report connection failures separately. A failed refresh should
+          // not falsely sign out a previously authenticated staff member.
+          errors.push('Could not refresh records: '+refreshError.message);
+        }
       }
     }
-    status=failed?'error':'connected';
-    lastError=failed?'Some selections could not be grouped; refresh and review.':'';
-  }catch(e){failed++;errors.push(e.message)}
+  }catch(e){noteFailure('Group operation',e)}
   finally{
     roundsBusy=false;
-    await refresh().catch(()=>{});
+    try{await refresh()}catch(e){errors.push('Final team refresh: '+e.message)}
+    // Grouping failures are NOT authentication failures. Preserve the
+    // authenticated Team Sync connection and keep unrelated brands usable.
+    if(statusView().connected){
+      lastError='';
+    }else if(token&&email&&role&&ready&&tokenExpiresAt(token)>Date.now()){
+      status='connected';lastError='';
+    }
+    groupSyncNotice={brandId:syncBrandId,brandName:syncBrandName,moved,already,created,failed,failedItems};
     paint();
-    alert('Team selection groups updated for '+brandNow().name+'.\n'+
+    alert('Team selection groups updated for '+syncBrandName+'.\n'+
       moved+' moved; '+already+' already grouped; '+created+' shared groups created; '+failed+' failed.\n'+
-      (errors.length?'Issues: '+errors.slice(0,3).join('; '):'All matched changes preserved quantities and approvals.'));
+      (failed?'See the failure details under Team Review for '+syncBrandName+'.':'All matched changes preserved quantities and approvals.'));
   }
+ }
+ function teamGroupSyncNotice(){
+  const report=groupSyncNotice;
+  if(!report||teamBrandFilter!==report.brandId||
+    !['Super Admin','Admin'].includes(role))return '';
+  const headline=report.failed?
+    report.brandName+': '+report.failed+' group assignment(s) need review':
+    report.brandName+': team groups synchronized';
+  const summary=report.moved+' moved · '+report.already+' already grouped · '+
+    report.created+' groups created';
+  const issues=report.failedItems.map(x=>'<li><strong>'+esc(x.subject)+'</strong>: '+esc(x.reason)+'</li>').join('');
+  return '<div class="team-group-sync-result" role="status">'+
+    '<div class="team-group-sync-heading"><strong>'+esc(headline)+'</strong>'+
+    '<button class="btn quiet small" type="button" data-sync-action="dismissTeamGroupNotice">Dismiss</button></div>'+
+    '<p class="tiny">'+esc(summary)+'</p>'+
+    (issues?'<details open><summary>View '+report.failed+' failed assignment(s)</summary>'+
+      '<ul>'+issues+'</ul></details>':'')+'</div>';
  }
 
  function filteredTeamRecords(){
@@ -1230,7 +1266,7 @@ async function exportTeamExcel(withCost=false){
     '<span class="tiny">Last refreshed: '+esc(lastFetched||'—')+' · '+records.length+' records</span></div>'+
     '<p class="tiny">Authenticated staff can browse approved private supplier catalogs. Product selections and approvals remain synchronized through the existing protected Google Sheet.</p>'+ (['Super Admin','Admin'].includes(role)&&serverFeatures.teamQtyEdit!==true?'<p class="tiny">Quantity editing and duplicate review will activate after the new private Google Apps Script backend is deployed.</p>':'')+'</div>'+
     '<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>'+
-    teamBrandFilterToolbar()+'<div class="row-list">'+rowsHTML()+'</div>'+adminCatalogForm();
+    teamBrandFilterToolbar()+teamGroupSyncNotice()+'<div class="row-list">'+rowsHTML()+'</div>'+adminCatalogForm();
  }
  document.addEventListener('submit',e=>{if(e.target.id==='liSupabaseSignIn'){e.preventDefault();supabaseLogin(e.target);return}if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target);return}if(e.target.matches('[data-team-edit-form]')){e.preventDefault();saveEditedUser(e.target);return}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
  document.addEventListener('toggle',event=>{
@@ -1270,6 +1306,7 @@ async function exportTeamExcel(withCost=false){
   }
   if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(false);if(act==='exportTeamExcelWithCost')exportTeamExcel(true);
   if(act==='applyMyGroupsToTeam')applyMyGroupsToTeam();
+  if(act==='dismissTeamGroupNotice'){groupSyncNotice=null;paint();return}
   if(act==='createTeamRound')newSharedTeamRound();
   if(act==='renameTeamRound')renameSharedTeamRound();
   if(act==='toggleTeamOrganize'){organizeTeamRounds=!organizeTeamRounds;paint()}
