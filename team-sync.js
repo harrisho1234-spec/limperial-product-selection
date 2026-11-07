@@ -487,7 +487,7 @@ async function onSupabaseIdentity(identity){
    if(!name.trim()||name.trim().length>60)return alert('Enter a group name up to 60 characters.');
    roundsBusy=true;
    try{const created=await call('manageTeamRound',{action:'create',brandId:teamBrandFilter,name:name.trim()});
-     teamRoundFilter=teamBrandFilter+'::'+created.id;await refresh();status='connected';paint();
+     teamRoundFilter=teamBrandFilter+'::'+created.id;try{localStorage.setItem(TEAM_ROUND_FILTER_KEY,teamRoundFilter)}catch(_){}await refresh();status='connected';paint();
    }catch(err){alert('Could not create team group: '+err.message)}
    finally{roundsBusy=false}
  }
@@ -744,7 +744,7 @@ async function exportTeamExcel(withCost=false){
        groups.push({key:'',code:'',brand,records:[record]});
        continue;
      }
-     const key=brand+'::'+code;
+     const key=brand+'::'+(teamRoundsAvailable()?teamRecordRound(record)+'::':'')+code;
      let group=map.get(key);
      if(!group){group={key,code:String(record.code||record.entry?.code||record.item?.code||'').trim(),brand,records:[]};map.set(key,group);groups.push(group)}
      group.records.push(record);
