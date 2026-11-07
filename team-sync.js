@@ -529,10 +529,27 @@ async function onSupabaseIdentity(identity){
     (!teamRoundsAvailable()||teamRoundFilter==='all'||roundKey(r)===teamRoundFilter))
    .sort(teamRoundsAvailable()?compareTeamRoundRecords:(a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
  }
- function exportTeamRows(){
-  // Export all matching, non-deleted records (the on-screen list is capped at 200).
-  // Source data is already limited by the server to the signed-in user's access.
-  return filteredTeamRecords().map((record,index)=>{
+ function teamExportScope(){
+  // Capture the two visible filters when the user clicks Export.
+  // Do not change scope during asynchronous photo or cost loading.
+  const brandId=teamBrandFilter;
+  const group=teamRoundsAvailable()&&teamRoundFilter!=='all'?
+    sharedRounds.find(r=>r.brandId+'::'+r.id===teamRoundFilter):null;
+  if(teamRoundsAvailable()&&teamRoundFilter!=='all'&&!group)
+    throw new Error('The selected Team Selection group is unavailable. Refresh and choose a group again.');
+  return {brandId,roundKey:group?teamRoundFilter:'all',roundName:group?.name||'All Groups'};
+ }
+ function teamExportRecords(scope){
+  return records.filter(r=>!r.deleted&&
+    (scope.brandId==='all'||String(r.brandId)===scope.brandId)&&
+    (!teamRoundsAvailable()||scope.roundKey==='all'||roundKey(r)===scope.roundKey))
+   .sort(teamRoundsAvailable()?compareTeamRoundRecords:
+     (a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
+ }
+ function exportTeamRows(scope){
+  // Only the explicitly selected brand and group; never use the full team list.
+  // Unlike the on-screen list, this includes more than 200 visible records.
+  return teamExportRecords(scope).map((record,index)=>{
     const entry=record.entry||{},item=record.item||{};
     const original=String(record.dimension||item.dimension||entry.originalSize||'').trim();
     const requested=String(record.targetSize||entry.targetSize||'').trim();
@@ -552,13 +569,16 @@ async function onSupabaseIdentity(identity){
     };
   });
 }
-function teamRoundFileSuffix(){
+function teamRoundFileSuffix(scope){
   if(!teamRoundsAvailable())return '';
-  if(teamRoundFilter==='all')return '_All_Groups';
-  const group=sharedRounds.find(r=>r.brandId+'::'+r.id===teamRoundFilter);
-  return '_'+String(group?.name||'Group').replace(/[^A-Za-z0-9_-]+/g,'_').slice(0,35);
+  return '_'+String(scope.roundName||'All Groups').replace(/[^A-Za-z0-9_-]+/g,'_').slice(0,35);
 }
-function exportTeamCsv(items,withCost=false,costs=[]){
+function teamExportLabel(){
+  if(!teamRoundsAvailable())return 'Team selections';
+  if(teamRoundFilter==='all')return 'All groups';
+  return sharedRounds.find(r=>r.brandId+'::'+r.id===teamRoundFilter)?.name||'Selected group';
+}
+function exportTeamCsv(items,scope,withCost=false,costs=[]){
   // Match the supplied nine-column Team Selections workbook.
   // CSV cannot embed photos; the Product photo cells remain empty.
   const headers=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request'];
@@ -579,7 +599,7 @@ function exportTeamCsv(items,withCost=false,costs=[]){
   const csv=[headers,...data].map(row=>row.map(safe).join(',')).join('\r\n');
   const blob=new Blob(['\uFEFF',csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob),link=document.createElement('a');
-  link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+teamRoundFileSuffix()+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.csv';
+  link.href=url;link.download='LImperial_Team_Selections_'+(scope.brandId==='all'?'All_Brands':scope.brandId.replace(/[^a-z0-9_-]/gi,'_'))+teamRoundFileSuffix(scope)+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.csv';
   document.body.appendChild(link);link.click();link.remove();
   setTimeout(()=>URL.revokeObjectURL(url),15000);
 }
@@ -587,8 +607,10 @@ let exportingTeamExcel=false;
 async function exportTeamExcel(withCost=false){
   if(!token||!email||!role)return alert('Sign in to export authorized team selections.');
   if(exportingTeamExcel)return;
-  const items=exportTeamRows();
-  if(!items.length)return alert('No team selections match this brand filter.');
+  let scope;
+  try{scope=teamExportScope()}catch(err){return alert(err.message)}
+  const items=exportTeamRows(scope);
+  if(!items.length)return alert('No team selections match the selected brand and group.');
   if(withCost&&!['Super Admin','Admin'].includes(role))return alert('Only Admin and Super Admin may export supplier costs.');
   if(withCost){
     if(!window.LISelectionCosts||!(await window.LISelectionCosts.requireAdmin()))return;
@@ -602,7 +624,7 @@ async function exportTeamExcel(withCost=false){
     // Cost data is NEVER requested for standard staff exports.
     if(withCost)costData=await window.LISelectionCosts.lookup(items.map(x=>x.record));
     if(!window.ExcelJS){
-      exportTeamCsv(items,withCost,costData||[]);
+      exportTeamCsv(items,scope,withCost,costData||[]);
       alert('The Excel library did not load. A CSV without photos has been downloaded instead.');
       return;
     }
@@ -660,7 +682,7 @@ async function exportTeamExcel(withCost=false){
     }
     // Retain the compact original photo sheet; a second index tab labels
     // the exact selection round for all brands and records.
-    if(teamRoundsAvailable()&&teamRoundFilter==='all'){
+    if(teamRoundsAvailable()&&scope.roundKey==='all'){
       const indexSheet=book.addWorksheet('Selection Groups');
       indexSheet.columns=[{width:9},{width:17},{width:27},{width:27},{width:28},{width:12},{width:18}];
       indexSheet.addRow(['Row no.','Supplier','Selection group','Product code','Selected by','Qty','Review decision']);
@@ -672,13 +694,17 @@ async function exportTeamExcel(withCost=false){
     const buf=await book.xlsx.writeBuffer();
     const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url=URL.createObjectURL(blob),link=document.createElement('a');
-    link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+teamRoundFileSuffix()+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.xlsx';
+    link.href=url;link.download='LImperial_Team_Selections_'+(scope.brandId==='all'?'All_Brands':scope.brandId.replace(/[^a-z0-9_-]/gi,'_'))+teamRoundFileSuffix(scope)+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.xlsx';
     document.body.appendChild(link);link.click();link.remove();
     setTimeout(()=>URL.revokeObjectURL(url),15000);
+    const supplier=scope.brandId==='all'?'all brands':scope.brandId.toUpperCase();
+    const selectedLabel=scope.roundName||'All Groups';
+    if(button)button.textContent='✓ Exported '+items.length;
+    console.info('Team selections export:',supplier,selectedLabel,items.length,'records');
   }catch(err){
     console.error('Team Excel export failed',err);
     if(withCost&&!costData)alert('Secure cost lookup failed; nothing was exported.');
-    else try{exportTeamCsv(items,withCost,costData||[]);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
+    else try{exportTeamCsv(items,scope,withCost,costData||[]);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
   }finally{
     exportingTeamExcel=false;
     if(button){button.disabled=false;button.textContent=originalLabel}
@@ -697,11 +723,11 @@ async function exportTeamExcel(withCost=false){
      '<button type="button" class="btn quiet small" data-sync-action="renameTeamRound"'+(teamRoundFilter==='all'||roundsBusy?' disabled':'')+'>Rename group</button>'+
      '<button type="button" class="btn secondary small" data-sync-action="toggleTeamOrganize">'+(organizeTeamRounds?'✓ Finish arranging':'↕ Arrange products')+'</button>':'')+
    (['Super Admin','Admin'].includes(role)?
-     '<details class="li-export-choice"><summary class="btn secondary small"'+(!filtered?' aria-disabled="true"':'')+'>⬇ Export Excel ▾</summary>'+
+     '<details class="li-export-choice"><summary class="btn secondary small"'+(!filtered?' aria-disabled="true"':'')+'>⬇ Export '+esc(teamExportLabel())+' ('+filtered+') ▾</summary>'+
      '<div class="li-export-menu"><button type="button" class="btn quiet small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>Without Cost</button>'+
      '<button type="button" class="btn quiet small" data-sync-action="exportTeamExcelWithCost"'+(!filtered?' disabled':'')+'>With Cost · Admin only</button></div></details>'+
      '<button type="button" class="btn quiet small" data-sync-action="toggleTeamCosts">Show / hide costs</button>':
-     '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export Excel</button>')+
+     '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export '+esc(teamExportLabel())+' ('+filtered+')</button>')+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
 
