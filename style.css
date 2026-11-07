@@ -342,6 +342,9 @@ body.li-auth-unlocked .li-auth-gate{display:none}
  min-width:0;font-size:11px;color:#38475b}
 .team-dup-review-description b{font-size:12px}
 .team-dup-review-description small{font-size:10px;color:#7a6a54}
+.team-duplicate-title>.team-dup-summary-warning{display:inline-flex;align-self:flex-start;
+ color:#8c3a19;background:#fff0dd;border:1px solid #ecc5a4;border-radius:7px;
+ padding:4px 8px;font-size:10px;font-weight:800}
 .team-dup-alert-label,.team-dup-reviewed-label{font-size:10px;line-height:1.2;font-weight:800;
  border-radius:20px;padding:4px 8px;white-space:nowrap}
 .team-dup-alert-label{background:#fff0d2;color:#835109;border:1px solid #edca87}
