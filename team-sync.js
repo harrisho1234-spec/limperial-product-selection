@@ -1071,9 +1071,20 @@ async function exportTeamExcel(withCost=false){
      TEAM_DUP_OPEN.set(detail.dataset.teamDuplicateKey,detail.open);
  },true);
  document.addEventListener('change',e=>{
+  if(e.target?.id==='liTeamRoundFilter'){
+    teamRoundFilter=e.target.value||'all';
+    try{localStorage.setItem(TEAM_ROUND_FILTER_KEY,teamRoundFilter)}catch(_){}
+    paint();return;
+  }
+  if(e.target?.dataset?.teamMoveRound){
+    const id=e.target.dataset.teamMoveRound,roundId=e.target.value;
+    const item=records.find(r=>r.recordId===id);
+    if(item&&teamRecordRound(item)!==roundId)placeTeamRecord(id,roundId);
+    return;
+  }
   if(e.target?.id!=='liTeamBrandFilter')return;
-  teamBrandFilter=e.target.value||'all';
-  try{localStorage.setItem(TEAM_BRAND_FILTER_KEY,teamBrandFilter)}catch(_){}
+  teamBrandFilter=e.target.value||'all';teamRoundFilter='all';
+  try{localStorage.setItem(TEAM_BRAND_FILTER_KEY,teamBrandFilter);localStorage.setItem(TEAM_ROUND_FILTER_KEY,teamRoundFilter)}catch(_){}
   paint();
  });
  document.addEventListener('click',e=>{const b=e.target.closest('[data-sync-action]');if(!b)return;const act=b.dataset.syncAction;
@@ -1090,6 +1101,11 @@ async function exportTeamExcel(withCost=false){
     .finally(()=>{userManageBusy=false;renderTeamManagement()});return;
   }
   if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(false);if(act==='exportTeamExcelWithCost')exportTeamExcel(true);
+  if(act==='createTeamRound')newSharedTeamRound();
+  if(act==='renameTeamRound')renameSharedTeamRound();
+  if(act==='toggleTeamOrganize'){organizeTeamRounds=!organizeTeamRounds;paint()}
+  if(act==='teamMoveUp')reorderTeamRecord(b.dataset.recordId,'up');
+  if(act==='teamMoveDown')reorderTeamRecord(b.dataset.recordId,'down');
   if(act==='editTeamQty')editTeamQuantity(b.dataset.recordId);
   if(act==='mergeExactDuplicates')reviewExactDuplicateGroup(b.dataset.duplicateKey,'merge');
   if(act==='keepDuplicatesSeparate')reviewExactDuplicateGroup(b.dataset.duplicateKey,'separate');
@@ -1115,5 +1131,24 @@ async function exportTeamExcel(withCost=false){
     }catch(error){lastError=String(error?.message||error);status='auth-required';syncAccessGate()}
   }).catch(error=>{lastError='Supabase connection unavailable: '+error.message;status='error';syncAccessGate()});
 }
+ document.addEventListener('dragstart',e=>{
+  const card=e.target.closest?.('[data-team-record][draggable="true"]');
+  if(!card||!teamRoundsAvailable()||!organizeTeamRounds)return;
+  draggingTeamRecord=card.dataset.teamRecord||'';
+  if(e.dataTransfer){e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',draggingTeamRecord)}
+ });
+ document.addEventListener('dragover',e=>{
+  if(!draggingTeamRecord||!e.target.closest?.('[data-team-record][draggable="true"]'))return;
+  e.preventDefault();if(e.dataTransfer)e.dataTransfer.dropEffect='move';
+ });
+ document.addEventListener('drop',e=>{
+  const target=e.target.closest?.('[data-team-record][draggable="true"]');
+  if(!draggingTeamRecord||!target)return;
+  e.preventDefault();
+  const moving=draggingTeamRecord;draggingTeamRecord='';
+  const dest=records.find(r=>r.recordId===target.dataset.teamRecord);
+  if(dest&&moving!==dest.recordId)placeTeamRecord(moving,teamRecordRound(dest),dest.recordId);
+ });
+ document.addEventListener('dragend',()=>{draggingTeamRecord=''});
  window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),refresh,disconnect,request:call};
 })();
