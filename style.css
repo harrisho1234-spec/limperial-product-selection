@@ -330,6 +330,29 @@ body.li-auth-unlocked .li-auth-gate{display:none}
  .team-review-count{font-size:9px;padding:3px 6px}
 }
 
+
+/* Team selection duplicate review: warning only; only management can merge. */
+.team-dup-review-box{display:grid;gap:9px;background:#fff9eb;border:1px solid #e9cf9c;
+ border-radius:10px;padding:12px;min-width:0}
+.team-dup-review-box h4{color:#6d4a19;font-size:13px;margin:0}
+.team-dup-review-box>p{margin:0;color:#765f3e;line-height:1.45}
+.team-dup-review-entry{display:flex;align-items:center;justify-content:space-between;
+ gap:12px;flex-wrap:wrap;padding:10px;background:#fff;border:1px solid #efdfc4;border-radius:8px}
+.team-dup-review-description{display:flex;gap:6px;flex-wrap:wrap;align-items:center;
+ min-width:0;font-size:11px;color:#38475b}
+.team-dup-review-description b{font-size:12px}
+.team-dup-review-description small{font-size:10px;color:#7a6a54}
+.team-dup-alert-label,.team-dup-reviewed-label{font-size:10px;line-height:1.2;font-weight:800;
+ border-radius:20px;padding:4px 8px;white-space:nowrap}
+.team-dup-alert-label{background:#fff0d2;color:#835109;border:1px solid #edca87}
+.team-dup-reviewed-label{background:#e2f4e7;color:#206d3c;border:1px solid #add7b9}
+.team-dup-review-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.team-dup-review-actions .btn{font-size:10px;padding:6px 10px}
+@media(max-width:650px){.team-dup-review-entry{align-items:flex-start}
+ .team-dup-review-actions{width:100%}
+ .team-dup-review-description{align-items:flex-start}
+}
+
 /* TL individual chandelier picker: crop one model from a multi-product scan. */
 .tl-picker-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;align-items:start}
 .tl-picker-grid>div{min-width:0}
