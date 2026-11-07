@@ -5,9 +5,12 @@
  const KEY='li-team-sync-client-config-v1';const SESSION_KEY='li-team-browser-session-v1';const APP_ORIGIN=location.origin;
  const DEFAULT_CONFIG={scriptUrl:'https://script.google.com/macros/s/AKfycbzlXPtmjhHpTot4R0ItabhBOQBrNamB2TUegdq6Lde-uX930U1hIohNqRsvUzMW5LYc1g/exec',clientId:'97172665640-k7lq4tqtl8jl3udei8f4f7tml8agfil4.apps.googleusercontent.com'};let config={...DEFAULT_CONFIG}; // Fixed trusted backend: never send a Supabase bearer token to a browser-configured URL.
  let iframe=null,bridgePopup=null,bridgePeer=null,bridgeOrigin='',bridgeNonce='',bridgeMode='iframe',signInStarted=false,ready=false,token='',email='',role='',displayName='';
- let records=[],brands=[],users=[],serverFeatures={},lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
+ let records=[],brands=[],users=[],sharedRounds=[],serverFeatures={},lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
  let editingUserEmail='',userManageBusy=false,userManageNotice='',userManageIsError=false;
  const TEAM_BRAND_FILTER_KEY='li-team-brand-filter-v1';
+ const TEAM_ROUND_FILTER_KEY='li-team-round-filter-v1';
+ let teamRoundFilter='all',organizeTeamRounds=false,roundsBusy=false,draggingTeamRecord='';
+ try{teamRoundFilter=localStorage.getItem(TEAM_ROUND_FILTER_KEY)||'all'}catch(_){teamRoundFilter='all'}
  let teamBrandFilter='all';
  try{teamBrandFilter=localStorage.getItem(TEAM_BRAND_FILTER_KEY)||'all'}catch(_){teamBrandFilter='all'}
  const versions=new Map();let gsiLoaded=false,gsiClient='',callbacks=null,interval=null,oneTapOffered=false,credentialInFlight=false,reconnectTimer=null,reconnectAttempts=0;
@@ -222,7 +225,7 @@ async function onSupabaseIdentity(identity){
   if(explicitSignOut&&window.google?.accounts?.id){
     try{google.accounts.id.disableAutoSelect();google.accounts.id.cancel?.()}catch(_){}
   }
-  window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];serverFeatures={};versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';hasUnlockedOnce=false;paint()}
+  window.LICentralCatalog?.onSignedOut();clearRememberedSession();if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}reconnectAttempts=0;token='';email='';role='';displayName='';records=[];brands=[];users=[];sharedRounds=[];serverFeatures={};versions.clear();ready=false;bridgeOrigin='';if(iframe){iframe.remove();iframe=null}if(bridgePopup){try{bridgePopup.close()}catch(_){ }bridgePopup=null}bridgePeer=null;bridgeNonce='';bridgeMode='iframe';signInStarted=false;for(const req of reqs.values()){clearTimeout(req.timer);req.resolve({ok:false,error:'Disconnected'})}reqs.clear();if(interval){clearInterval(interval);interval=null}status=keepConfig?'not-connected':'configured';hasUnlockedOnce=false;paint()}
  function sanitizeTeamRecordPrice(record){
    if(!record||record.brandId!=='asfour')return record;
    const item=record.item||{};
@@ -233,7 +236,7 @@ async function onSupabaseIdentity(identity){
    if(name===record.name&&itemName===item.name)return record;
    return {...record,name,item:{...item,name:itemName}};
  }
- async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);brands=data.brands||[];users=data.users||[];serverFeatures=data.features||{};window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
+ async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);brands=data.brands||[];users=data.users||[];sharedRounds=data.selectionRounds||[];serverFeatures=data.features||{};window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
   // Create lightweight brand records for shared suppliers without overwriting local private catalogs.
   const existing=new Set(BRANDS.map(x=>x.id));let changed=false;for(const b of brands){if(!existing.has(b.id)){BRANDS.push({id:b.id,name:b.name,category:b.category||'Other',shared:true});changed=true}}if(changed)persistBrandDirectory();
   return data}
@@ -442,9 +445,89 @@ async function onSupabaseIdentity(identity){
   return [...names].sort((a,b)=>a[1].localeCompare(b[1])).map(([id,name])=>
    '<option value="'+esc(id)+'"'+(teamBrandFilter===id?' selected':'')+'>'+esc(name)+' ('+(totals.get(id)||0)+')</option>').join('');
  }
+
+ function teamRoundsAvailable(){return serverFeatures.sharedTeamRounds===true}
+ function teamRoundName(brandId,id){return sharedRounds.find(r=>r.brandId===brandId&&r.id===id)?.name||(id==='round-1'?'1st Selection':'Selection group')}
+ function teamRecordRound(record){
+   const value=String(record?.entry?.teamRoundId||'round-1');
+   return sharedRounds.some(r=>r.brandId===record.brandId&&r.id===value)?value:'round-1';
+ }
+ function teamRecordPosition(record){const n=Number(record?.entry?.teamPosition);
+   return Number.isSafeInteger(n)&&n>0?n:Number.MAX_SAFE_INTEGER}
+ function compareTeamRoundRecords(a,b){
+   const ra=sharedRounds.find(r=>r.brandId===a.brandId&&r.id===teamRecordRound(a));
+   const rb=sharedRounds.find(r=>r.brandId===b.brandId&&r.id===teamRecordRound(b));
+   return String(a.brandId).localeCompare(String(b.brandId))||Number(ra?.order||1)-Number(rb?.order||1)||
+     teamRecordPosition(a)-teamRecordPosition(b)||
+     String(a.updatedAt||'').localeCompare(String(b.updatedAt||''))||
+     String(a.recordId).localeCompare(String(b.recordId));
+ }
+ function roundKey(record){return record.brandId+'::'+teamRecordRound(record)}
+ function roundFilterOptions(){
+   if(!teamRoundsAvailable())return '';
+   const activeBrands=teamBrandFilter==='all'?brands.filter(b=>b.active):brands.filter(b=>b.id===teamBrandFilter);
+   const list=activeBrands.flatMap(b=>sharedRounds.filter(r=>r.brandId===b.id).sort((a,c)=>a.order-c.order)
+     .map(r=>({key:b.id+'::'+r.id,brand:b.name||b.id,...r})));
+   if(teamRoundFilter!=='all'&&!list.some(r=>r.key===teamRoundFilter))teamRoundFilter='all';
+   const options=list.map(r=>{
+     const count=records.filter(x=>!x.deleted&&roundKey(x)===r.key).length;
+     return '<option value="'+esc(r.key)+'"'+(teamRoundFilter===r.key?' selected':'')+'>'+
+       esc((teamBrandFilter==='all'?r.brand+' · ':'')+r.name)+' ('+count+')</option>';
+   }).join('');
+   return '<label for="liTeamRoundFilter">Selection group</label><select id="liTeamRoundFilter" aria-label="Filter by selection group">'+
+     '<option value="all"'+(teamRoundFilter==='all'?' selected':'')+'>All groups</option>'+options+'</select>';
+ }
+ async function newSharedTeamRound(){
+   if(!teamRoundsAvailable()||!['Super Admin','Admin'].includes(role))return;
+   if(teamBrandFilter==='all')return alert('Choose one brand before creating a shared group.');
+   const n=sharedRounds.filter(r=>r.brandId===teamBrandFilter).length+1;
+   const ord=x=>x+(x%100>=11&&x%100<=13?'th':x%10===1?'st':x%10===2?'nd':x%10===3?'rd':'th');
+   const name=prompt('New shared selection group for '+teamBrandFilter+':',ord(n)+' Selection');
+   if(name===null)return;
+   if(!name.trim()||name.trim().length>60)return alert('Enter a group name up to 60 characters.');
+   roundsBusy=true;
+   try{const created=await call('manageTeamRound',{action:'create',brandId:teamBrandFilter,name:name.trim()});
+     teamRoundFilter=teamBrandFilter+'::'+created.id;await refresh();status='connected';paint();
+   }catch(err){alert('Could not create team group: '+err.message)}
+   finally{roundsBusy=false}
+ }
+ async function renameSharedTeamRound(){
+   if(!teamRoundsAvailable()||!['Super Admin','Admin'].includes(role))return;
+   const r=sharedRounds.find(x=>x.brandId+'::'+x.id===teamRoundFilter);
+   if(!r||r.id==='round-1')return alert('Choose a custom group to rename.');
+   const name=prompt('Rename '+r.name+':',r.name);
+   if(name===null)return;
+   if(!name.trim()||name.trim().length>60)return alert('Enter a group name up to 60 characters.');
+   roundsBusy=true;
+   try{await call('manageTeamRound',{action:'rename',brandId:r.brandId,roundId:r.id,
+     expectedRevision:r.revision,name:name.trim()});
+     await refresh();status='connected';paint();
+   }catch(err){alert('Could not rename team group: '+err.message)}
+   finally{roundsBusy=false}
+ }
+ async function placeTeamRecord(id,roundId,beforeRecordId=''){
+   if(roundsBusy||!teamRoundsAvailable()||!['Super Admin','Admin'].includes(role))return;
+   const item=records.find(r=>r.recordId===id&&!r.deleted);if(!item)return;
+   if(!sharedRounds.some(r=>r.brandId===item.brandId&&r.id===roundId))return alert('Invalid group.');
+   if(beforeRecordId===id)return;
+   roundsBusy=true;
+   try{await call('placeTeamSelection',{recordId:item.recordId,expectedRevision:item.revision,roundId,beforeRecordId});
+     await refresh();status='connected';lastError='';paint();
+   }catch(err){alert('Unable to move selection: '+err.message);await refresh().catch(()=>{});paint()}
+   finally{roundsBusy=false}
+ }
+ function reorderTeamRecord(id,direction){
+   const record=records.find(r=>r.recordId===id&&!r.deleted);if(!record)return;
+   const group=records.filter(r=>!r.deleted&&roundKey(r)===roundKey(record)).sort(compareTeamRoundRecords);
+   const at=group.findIndex(r=>r.recordId===id);if(at<0)return;
+   if(direction==='up'&&at>0)return placeTeamRecord(id,teamRecordRound(record),group[at-1].recordId);
+   if(direction==='down'&&at<group.length-1)return placeTeamRecord(id,teamRecordRound(record),group[at+2]?.recordId||'');
+ }
+
  function filteredTeamRecords(){
-  return records.filter(r=>!r.deleted&&(teamBrandFilter==='all'||String(r.brandId)===teamBrandFilter))
-    .sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
+  return records.filter(r=>!r.deleted&&(teamBrandFilter==='all'||String(r.brandId)===teamBrandFilter)&&
+    (!teamRoundsAvailable()||teamRoundFilter==='all'||roundKey(r)===teamRoundFilter))
+   .sort(teamRoundsAvailable()?compareTeamRoundRecords:(a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')));
  }
  function exportTeamRows(){
   // Export all matching, non-deleted records (the on-screen list is capped at 200).
