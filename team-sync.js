@@ -671,7 +671,7 @@ async function onSupabaseIdentity(identity){
  }
  function teamGroupSyncNotice(){
   const report=groupSyncNotice;
-  if(!report||teamBrandFilter!==report.brandId||
+  if(!report||teamBrandFilter!==report.brandId||ACTIVE_BRAND_ID!==report.brandId||
     !['Super Admin','Admin'].includes(role))return '';
   const headline=report.failed?
     report.brandName+': '+report.failed+' group assignment(s) need review':
