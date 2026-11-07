@@ -552,6 +552,12 @@ async function onSupabaseIdentity(identity){
     };
   });
 }
+function teamRoundFileSuffix(){
+  if(!teamRoundsAvailable())return '';
+  if(teamRoundFilter==='all')return '_All_Groups';
+  const group=sharedRounds.find(r=>r.brandId+'::'+r.id===teamRoundFilter);
+  return '_'+String(group?.name||'Group').replace(/[^A-Za-z0-9_-]+/g,'_').slice(0,35);
+}
 function exportTeamCsv(items,withCost=false,costs=[]){
   // Match the supplied nine-column Team Selections workbook.
   // CSV cannot embed photos; the Product photo cells remain empty.
@@ -573,7 +579,7 @@ function exportTeamCsv(items,withCost=false,costs=[]){
   const csv=[headers,...data].map(row=>row.map(safe).join(',')).join('\r\n');
   const blob=new Blob(['\uFEFF',csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob),link=document.createElement('a');
-  link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.csv';
+  link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+teamRoundFileSuffix()+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.csv';
   document.body.appendChild(link);link.click();link.remove();
   setTimeout(()=>URL.revokeObjectURL(url),15000);
 }
@@ -652,10 +658,21 @@ async function exportTeamExcel(withCost=false){
         }catch(err){console.warn('Unable to include approved product photo',err)}
       }
     }
+    // Retain the compact original photo sheet; a second index tab labels
+    // the exact selection round for all brands and records.
+    if(teamRoundsAvailable()&&teamRoundFilter==='all'){
+      const indexSheet=book.addWorksheet('Selection Groups');
+      indexSheet.columns=[{width:9},{width:17},{width:27},{width:27},{width:28},{width:12},{width:18}];
+      indexSheet.addRow(['Row no.','Supplier','Selection group','Product code','Selected by','Qty','Review decision']);
+      indexSheet.getRow(1).font={bold:true,color:{argb:'FF17304D'}};
+      items.forEach((info,i)=>indexSheet.addRow([i+1,info.brand,
+        teamRoundName(info.record.brandId,teamRecordRound(info.record)),
+        info.code,teamOwnerName(info.record),info.qty,info.decision]));
+    }
     const buf=await book.xlsx.writeBuffer();
     const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url=URL.createObjectURL(blob),link=document.createElement('a');
-    link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.xlsx';
+    link.href=url;link.download='LImperial_Team_Selections_'+(teamBrandFilter==='all'?'All_Brands':teamBrandFilter.replace(/[^a-z0-9_-]/gi,'_'))+teamRoundFileSuffix()+'_'+new Date().toISOString().slice(0,10)+(withCost?'_With_Cost':'')+'.xlsx';
     document.body.appendChild(link);link.click();link.remove();
     setTimeout(()=>URL.revokeObjectURL(url),15000);
   }catch(err){
