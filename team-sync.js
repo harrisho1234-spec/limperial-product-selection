@@ -536,7 +536,7 @@ async function onSupabaseIdentity(identity){
       (id==='round-1'?'1st Selection':'');
     return String(name||'').trim();
   };
-  const norm=x=>String(x??'').trim().toLowerCase().replace(/\\s+/g,' ');
+  const norm=x=>String(x??'').trim().toLowerCase().replace(/\s+/g,' ');
   const ownByKey=new Map();
   let ambiguous=0;
   const addLocal=(kind,id,entry)=>{
@@ -586,14 +586,14 @@ async function onSupabaseIdentity(identity){
   const names=[...new Set(plan.matches.map(m=>m.groupName))];
   const needs=names.filter(name=>!sharedRounds.some(r=>
      r.brandId===ACTIVE_BRAND_ID&&r.name.trim().toLowerCase()===name.toLowerCase()));
-  const summary=names.map(name=>name+': '+plan.matches.filter(m=>m.groupName===name).length).join('\\n');
-  const confirmText='Apply My Selections groups to matching '+brandNow().name+' Team selections?\\n\\n'+
-    summary+'\\n\\n'+
-    (needs.length?'New shared groups: '+needs.join(', ')+'\\n':'')+
-    'Only exact product ID and matching specifications are included.\\n'+
-    'No new products are submitted, and no quantities, approvals or ownership change.\\n'+
-    'This may reorganize submissions made by other staff.\\n'+
-    (plan.skipped.details+plan.skipped.ambiguous?'Skipped ambiguous/specification matches: '+(plan.skipped.details+plan.skipped.ambiguous)+'\\n':'')+
+  const summary=names.map(name=>name+': '+plan.matches.filter(m=>m.groupName===name).length).join('\n');
+  const confirmText='Apply My Selections groups to matching '+brandNow().name+' Team selections?\n\n'+
+    summary+'\n\n'+
+    (needs.length?'New shared groups: '+needs.join(', ')+'\n':'')+
+    'Only exact product ID and matching specifications are included.\n'+
+    'No new products are submitted, and no quantities, approvals or ownership change.\n'+
+    'This may reorganize submissions made by other staff.\n'+
+    (plan.skipped.details+plan.skipped.ambiguous?'Skipped ambiguous/specification matches: '+(plan.skipped.details+plan.skipped.ambiguous)+'\n':'')+
     'Proceed?';
   if(!confirm(confirmText))return;
   roundsBusy=true;
@@ -640,8 +640,8 @@ async function onSupabaseIdentity(identity){
     roundsBusy=false;
     await refresh().catch(()=>{});
     paint();
-    alert('Team selection groups updated for '+brandNow().name+'.\\n'+
-      moved+' moved; '+already+' already grouped; '+created+' shared groups created; '+failed+' failed.\\n'+
+    alert('Team selection groups updated for '+brandNow().name+'.\n'+
+      moved+' moved; '+already+' already grouped; '+created+' shared groups created; '+failed+' failed.\n'+
       (errors.length?'Issues: '+errors.slice(0,3).join('; '):'All matched changes preserved quantities and approvals.'));
   }
  }
