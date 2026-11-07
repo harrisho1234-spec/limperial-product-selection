@@ -480,3 +480,20 @@ body.li-auth-unlocked .li-auth-gate{display:none}
  .team-arrange-item{justify-content:flex-start}
  .team-list-row[draggable="true"]{cursor:auto}
 }
+
+
+/* A batch group-sync failure is an item-level business notice, never a login error. */
+.team-group-sync-result{
+ margin:12px 0 16px;padding:11px 13px;border:1px solid #d9c392;
+ border-left:3px solid #b38b4c;border-radius:8px;background:#fff9ee;
+ color:#3b3e4a;overflow-wrap:anywhere
+}
+.team-group-sync-heading{display:flex;align-items:center;justify-content:space-between;
+ flex-wrap:wrap;gap:9px}
+.team-group-sync-heading strong{font-size:12px;color:#674e22}
+.team-group-sync-result p{margin:6px 0;font-size:11px}
+.team-group-sync-result summary{cursor:pointer;font-weight:700;font-size:11px;padding:5px 0}
+.team-group-sync-result ul{margin:5px 0 0;padding-left:20px;max-height:220px;overflow:auto}
+.team-group-sync-result li{padding:4px 0;font-size:11px;line-height:1.5;
+ border-bottom:1px solid rgba(153,118,63,.12)}
+@media(max-width:650px){.team-group-sync-result{padding:9px 10px}}
