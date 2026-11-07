@@ -545,7 +545,7 @@ async function onSupabaseIdentity(identity){
     const groupName=nameFor(roundId);
     if(!groupName)return;
     const key=kind+'|'+id;
-    const spec={targetSize:norm(entry.targetSize),finish:norm(entry.finish),crystal:norm(entry.crystal)};
+    const spec={targetSize:norm(entry.targetSize),finish:norm(entry.finish),crystal:norm(entry.crystal),request:norm(entry.request)};
     const prev=ownByKey.get(key);
     if(prev&&prev.roundId!==roundId){ownByKey.set(key,{ambiguous:true});ambiguous++;return}
     if(!prev)ownByKey.set(key,{roundId,groupName,spec});
@@ -564,7 +564,8 @@ async function onSupabaseIdentity(identity){
     const ownSize=entry.spec.targetSize===original?'':entry.spec.targetSize;
     const finish=norm(record.entry?.finish||record.finish);
     const crystal=norm(record.entry?.crystal||record.crystal);
-    return actualSize===ownSize&&finish===entry.spec.finish&&crystal===entry.spec.crystal;
+    const request=norm(record.entry?.request||record.request);
+    return actualSize===ownSize&&finish===entry.spec.finish&&crystal===entry.spec.crystal&&request===entry.spec.request;
   };
   const matches=[],skipped={unmatched:0,ambiguous,details:0};
   for(const record of records){
