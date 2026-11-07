@@ -758,7 +758,7 @@ async function exportTeamExcel(withCost=false){
   const code=teamCodeKey(record);
   if(!code)return '';
   return JSON.stringify([
-    norm(record.brandId),code,norm(record.ownerEmail),norm(entry.roundId||'round-1'),
+    norm(record.brandId),code,norm(record.ownerEmail),norm(teamRoundsAvailable()?teamRecordRound(record):(entry.roundId||'round-1')),
     norm(record.name||item.name),norm(record.dimension||entry.originalSize),
     norm(entry.targetSize),norm(entry.finish),norm(entry.crystal),norm(entry.request||record.notes)
   ]);
