@@ -650,13 +650,17 @@ async function onSupabaseIdentity(identity){
   }catch(e){noteFailure('Group operation',e)}
   finally{
     roundsBusy=false;
-    try{await refresh()}catch(e){errors.push('Final team refresh: '+e.message)}
-    // Grouping failures are NOT authentication failures. Preserve the
-    // authenticated Team Sync connection and keep unrelated brands usable.
-    if(statusView().connected){
+    let finalRefreshError=null;
+    try{await refresh()}catch(e){finalRefreshError=e;errors.push('Final team refresh: '+e.message)}
+    // A partial *business operation* failure never revokes authentication.
+    // Only an actual failed Team Sync refresh may switch to connection recovery.
+    if(finalRefreshError){
+      status='offline';
+      lastError='Team connection problem: '+finalRefreshError.message;
+      scheduleRetry();
+    }else{
+      status='connected';
       lastError='';
-    }else if(token&&email&&role&&ready&&tokenExpiresAt(token)>Date.now()){
-      status='connected';lastError='';
     }
     groupSyncNotice={brandId:syncBrandId,brandName:syncBrandName,moved,already,created,failed,failedItems};
     paint();
