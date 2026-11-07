@@ -494,7 +494,7 @@ async function onSupabaseIdentity(identity){
  async function renameSharedTeamRound(){
    if(!teamRoundsAvailable()||!['Super Admin','Admin'].includes(role))return;
    const r=sharedRounds.find(x=>x.brandId+'::'+x.id===teamRoundFilter);
-   if(!r||r.id==='round-1')return alert('Choose a custom group to rename.');
+   if(!r)return alert('Choose a selection group to rename.');
    const name=prompt('Rename '+r.name+':',r.name);
    if(name===null)return;
    if(!name.trim()||name.trim().length>60)return alert('Enter a group name up to 60 characters.');
@@ -677,7 +677,7 @@ async function exportTeamExcel(withCost=false){
    options+'</select>'+roundFilterOptions()+
    (teamRoundsAvailable()&&['Super Admin','Admin'].includes(role)?
      '<button type="button" class="btn secondary small" data-sync-action="createTeamRound"'+(teamBrandFilter==='all'||roundsBusy?' disabled':'')+'>＋ New group</button>'+
-     '<button type="button" class="btn quiet small" data-sync-action="renameTeamRound"'+(teamRoundFilter==='all'||teamRoundFilter.endsWith('::round-1')||roundsBusy?' disabled':'')+'>Rename group</button>'+
+     '<button type="button" class="btn quiet small" data-sync-action="renameTeamRound"'+(teamRoundFilter==='all'||roundsBusy?' disabled':'')+'>Rename group</button>'+
      '<button type="button" class="btn secondary small" data-sync-action="toggleTeamOrganize">'+(organizeTeamRounds?'✓ Finish arranging':'↕ Arrange products')+'</button>':'')+
    (['Super Admin','Admin'].includes(role)?
      '<details class="li-export-choice"><summary class="btn secondary small"'+(!filtered?' aria-disabled="true"':'')+'>⬇ Export Excel ▾</summary>'+
