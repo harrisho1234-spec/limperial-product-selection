@@ -630,3 +630,34 @@ body.li-auth-unlocked .li-auth-gate{display:none}
  .li-photo-lightbox-controls button{padding:5px 8px}
  .li-photo-zoom-stage{width:min(94vw,60vh);height:min(94vw,60vh)}
 }
+
+
+/* Shared purchasing round lifecycle: finished batches remain visible and exportable. */
+.team-round-lifecycle{
+ margin:10px 0 16px;padding:12px 14px;border:1px solid #ddd4c3;
+ border-radius:10px;background:#f8f6f0;color:#24374d
+}
+.team-round-lifecycle strong{font-size:13px}
+.team-round-lifecycle .tiny{margin:6px 0 0;font-size:11px;line-height:1.5}
+.team-round-state,.selection-round-finished,.selection-round-open{
+ display:inline-flex;align-items:center;border-radius:20px;
+ padding:3px 8px;font-size:10px;font-weight:800;line-height:1.5;white-space:normal
+}
+.team-round-finished,.selection-round-finished{
+ background:#e9f1ed;color:#236247;border:1px solid #b9d6c4
+}
+.team-round-open,.selection-round-open{
+ background:#fff7e7;color:#79561d;border:1px solid #ebd7a5
+}
+.team-round-header .team-round-finished{margin-left:7px}
+.team-list-row-finished{border-color:#d9ded7;background:#f9faf8}
+.selection-round-heading{flex-wrap:wrap}
+.selection-round-heading .selection-round-finished{margin-left:6px}
+.selection-item[data-selection-finished="true"]{
+ border-color:#d7dfd9;background:#fafbf9
+}
+.selection-item[data-selection-finished="true"] [data-edit]:disabled,
+.selection-item[data-selection-finished="true"] [data-round-kind]:disabled{
+ color:#68777a;background:#f1f3f1;opacity:.84
+}
+@media(max-width:650px){.team-round-lifecycle{padding:10px 12px}.team-round-state{margin-top:4px}}
