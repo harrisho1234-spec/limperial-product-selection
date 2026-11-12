@@ -476,6 +476,73 @@ async function onSupabaseIdentity(identity){
  }
 
  function teamRoundsAvailable(){return serverFeatures.sharedTeamRounds===true}
+ function lifecycleAvailable(){return serverFeatures.sharedRoundLifecycle===true}
+ function teamRoundById(brandId,id){return sharedRounds.find(r=>r.brandId===brandId&&r.id===id)}
+ function isFinishedTeamRound(brandId,id){return lifecycleAvailable()&&teamRoundById(brandId,id)?.status==='Finished'}
+ function groupReviewStats(brandId,id){
+  const active=records.filter(r=>!r.deleted&&r.brandId===brandId&&teamRecordRound(r)===id);
+  return {total:active.length,approved:active.filter(r=>r.decision==='Approved'&&Number(r.qty)>0).length,
+    pending:active.filter(r=>!['Approved','Rejected','Skip'].includes(r.decision)).length,
+    missingQty:active.filter(r=>r.decision==='Approved'&&!(Number(r.qty)>0)).length,
+    rejected:active.filter(r=>r.decision==='Rejected').length};
+ }
+ function selectedSharedRound(){
+  return teamRoundFilter==='all'?null:sharedRounds.find(r=>r.brandId+'::'+r.id===teamRoundFilter);
+ }
+ function teamRoundStatusPanel(){
+  const round=selectedSharedRound();
+  if(!round||!lifecycleAvailable())return '';
+  const counts=groupReviewStats(round.brandId,round.id),finished=round.status==='Finished';
+  return '<section class="team-round-lifecycle" aria-label="Selection round status"><div>'+
+    '<strong>'+esc(round.name)+'</strong> <span class="team-round-state '+(finished?'team-round-finished':'team-round-open')+'">'+
+    (finished?'✓ Finished · approved for supplier':'Open · selection in progress')+'</span>'+
+    '<p class="tiny">'+counts.approved+' approved · '+counts.pending+' awaiting review · '+
+      counts.missingQty+' approved without quantity · '+counts.rejected+' rejected</p>'+
+    (finished?'<p class="tiny">Finished '+esc(round.finishedAt||'')+' by '+esc(round.finishedBy||'Admin')+
+      '. This round is archived and read-only; exports remain available.</p>':
+      '<p class="tiny">When all selected products are approved, Admin can finish this round and start the next selection. Finished does not mean supplier production or shipment.</p>')+
+    '</div></section>';
+ }
+ async function changeRoundLifecycle(action){
+  if(roundsBusy||!lifecycleAvailable()||!['Super Admin','Admin'].includes(role))return;
+  const current=selectedSharedRound();if(!current||current.brandId!==teamBrandFilter)return;
+  if(action==='finishAndNext'&&current.status==='Finished')return alert('This selection round is already finished.');
+  if(action==='reopen'&&current.status!=='Finished')return alert('This round is already open.');
+  const stats=groupReviewStats(current.brandId,current.id);
+  let reason='';
+  if(action==='finishAndNext'){
+    if(!stats.approved||stats.pending||stats.missingQty)
+      return alert('Cannot finish. '+stats.pending+' selections still need review; '+
+       stats.missingQty+' approved items need a quantity. At least one approved item is required.');
+    if(!confirm('Finish '+current.name+' for supplier preparation?\n\n'+
+      stats.approved+' approved items will become read-only. Rejected items remain in history.\n'+
+      'The next selection group will open for new products.\n'+
+      'This does NOT confirm a purchase order was sent.'))return;
+  }else{
+    const value=prompt('Why reopen '+current.name+'? Your reason will be logged.');
+    if(value===null)return;
+    reason=value.trim();if(reason.length<3)return alert('Enter a reason (at least 3 characters).');
+  }
+  roundsBusy=true;
+  try{
+    const result=await call('manageTeamRound',{action,brandId:current.brandId,roundId:current.id,
+      expectedRevision:current.revision,reason});
+    if(result.nextRound?.id){
+      teamRoundFilter=current.brandId+'::'+result.nextRound.id;
+      try{localStorage.setItem(TEAM_ROUND_FILTER_KEY,teamRoundFilter)}catch(_){}
+      window.LIAppRoundFinished?.(current.brandId,result.nextRound.id);
+    }
+    await refresh();status='connected';lastError='';paint();
+    alert(action==='finishAndNext'?
+      current.name+' is Finished. '+(result.nextRound?.name||'Next selection')+
+       ' is open for new products. The finished round remains available for export.':
+      current.name+' is now open again. The change has been logged.');
+  }catch(error){
+    alert('Unable to change selection-round status: '+error.message);
+    await refresh().catch(()=>{});paint();
+  }finally{roundsBusy=false}
+ }
+
  function teamRoundName(brandId,id){return sharedRounds.find(r=>r.brandId===brandId&&r.id===id)?.name||(id==='round-1'?'1st Selection':'Selection group')}
  function teamRecordRound(record){
    const value=String(record?.entry?.teamRoundId||'round-1');
