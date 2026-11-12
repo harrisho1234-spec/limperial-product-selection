@@ -236,7 +236,7 @@
   const result=[];
   for(let i=0;i<normalized.length;i+=90){
    const {data,error}=await client.from(LIST_PRICES)
-    .select('supplier_code,list_price_2025,list_price_2022,source_page_2025,source_page_2022')
+    .select('supplier_code,list_price_2026,list_price_2025,list_price_2022,source_page_2026,source_page_2025,source_page_2022')
     .eq('brand_id','asfour').in('supplier_code',normalized.slice(i,i+90)).limit(120);
    if(error)throw Error('Confidential Asfour price-list access denied. Check Admin login.');
    result.push(...(data||[]));
@@ -247,15 +247,30 @@
  function listPriceMarkup(code){
   const p=listPriceForCode(code);
   if(!p)return '';
-  const latest=p.list_price_2025==null?null:Number(p.list_price_2025);
+  const current=p.list_price_2026==null?null:Number(p.list_price_2026);
+  const previous=p.list_price_2025==null?null:Number(p.list_price_2025);
   const historical=p.list_price_2022==null?null:Number(p.list_price_2022);
-  const summary=latest!=null?'Asfour 2025 list: '+format(latest):historical!=null?'Asfour 2022 list (historical): '+format(historical):'';
-  const changed=latest!=null&&historical!=null&&latest!==historical;
-  if(!summary)return '';
-  return '<div class="li-cost-row li-price-reference"><b>'+safeHtml(summary)+'</b>'+
-    (changed?' <span class="tiny">2022: '+safeHtml(format(historical))+' · historical price differs</span>':'')+
-    '<div class="tiny">Printed supplier list price — NOT confirmed purchase cost</div></div>';
+  const latest=current!=null?current:(previous!=null?previous:historical);
+  if(latest===null||!Number.isFinite(latest))return '';
+  const latestYear=current!=null?'2026':previous!=null?'2025':'2022';
+  const difference=current!=null&&previous!=null?current-previous:null;
+  const sign=difference>0?'↑':difference<0?'↓':'';
+  const change=difference!==null&&difference!==0?
+    '<span class="tiny"> '+sign+' '+safeHtml(format(Math.abs(difference)))+
+    ' vs 2025'+(previous>0?' ('+safeHtml((difference/previous*100).toFixed(1))+'%)':'')+'</span>':'';
+  const history=current!==null&&previous!==null?
+    '<div class="tiny">2025 list: '+safeHtml(format(previous))+
+    (historical!==null&&historical!==previous?' · 2022: '+safeHtml(format(historical)):'')+'</div>':
+    latestYear==='2025'&&historical!==null&&previous!==historical?
+    '<div class="tiny">2022: '+safeHtml(format(historical))+'</div>':'';
+  const page=current!=null&&p.source_page_2026!=null?
+    ' · 2026 PDF p.'+safeHtml(p.source_page_2026):'';
+  return '<div class="li-cost-row li-price-reference"><b>Asfour '+latestYear+
+    ' supplier list: '+safeHtml(format(latest))+'</b>'+change+
+    history+'<div class="tiny">Quoted USD price'+page+
+    ' — NOT confirmed purchase cost or L\'Imperial selling price</div></div>';
  }
+
  async function toggleAsfourListPrices(codes,reread){
   if(!isExistingAdmin())throw Error('Admin access required');
   if(listPriceVisible){listPriceVisible=false;listPriceByCode.clear();reread?.();return;}
