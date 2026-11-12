@@ -166,7 +166,9 @@ function duplicateCatalogSelection(id){
  do{copyId='copy-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9)}
  while(S.catalogDuplicates[copyId]||S.catalog[copyId]||PACK.items.some(x=>x.id===copyId));
  const from=candidateEntry(item);
- S.catalogDuplicates[copyId]={...from,roundId:chosenRoundId()==='all'?'round-1':chosenRoundId(),sourceItemId:item.sourceItemId||item.id,decision:'Select',supplierStatus:'Not requested',targetSize:'',qty:Number(from.qty)>0?Number(from.qty):1};
+ const newRound=nextOpenSelectionRound();
+ if(!newRound||roundFinished(newRound))return alert('No open selection group. Ask Admin to start a new shared round.');
+ S.catalogDuplicates[copyId]={...from,roundId:newRound,sourceItemId:item.sourceItemId||item.id,decision:'Select',supplierStatus:'Not requested',targetSize:'',qty:Number(from.qty)>0?Number(from.qty):1};
  save();
  window.LITeamSync?.itemChanged('catalog',copyId);
  if(MODAL?.type==='item')closeDrawer();
@@ -344,7 +346,7 @@ function renderSelected(){
   '<span class="tiny">Groups organize your work; existing approval statuses and supplier confirmations remain unchanged.</span></div>'+
   (cards||'<div class="empty"><h2>No selections yet</h2><button class="btn secondary" data-action="goto" data-to="discover">Browse catalog</button></div>');
  $('app').querySelectorAll('.selection-item[data-selection-finished="true"]').forEach(card=>{
-  card.querySelectorAll('[data-edit],[data-round-kind],[data-action="duplicateCandidate"],[data-action="removeCandidate"]').forEach(el=>{el.disabled=true});
+  card.querySelectorAll('[data-edit],[data-round-kind],[data-action="removeCandidate"]').forEach(el=>{el.disabled=true});
  });
  if(ACTIVE_BRAND_ID==='lumax'){
   const pricingCandidates=[...candidatesAll.map(i=>({...i,brandId:ACTIVE_BRAND_ID,kind:'catalog',itemId:i.id})),
@@ -857,7 +859,15 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
    if(MODAL?.type==='item'&&MODAL.id===id)itemDrawer(id);else render()
   })}catch(e){alert('Unable to save LM pricing: '+e.message)}
  break;
-}case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{if(ACTIVE_BRAND_ID==='tl'&&PACK?.items?.some(x=>x.id===id&&(x.tlPageReference||(x.source==='tl-chandelier'&&!x.code)))){toast('Original pages are references. Select an individual model in Discover.');break}if(!selectionForItem(id)&&!S.shortlist.includes(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}S.catalog[id]={...candidateEntry(item),decision:'Select',qty:1,roundId:chosenRoundId()==='all'?'round-1':chosenRoundId()};if(!S.shortlist.includes(id))S.shortlist.push(id)}else{
+}case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{
+ const already=selectionForItem(id);
+ if(already&&roundFinished(entryRoundId(already))){
+  if(!confirm('This product belongs to a Finished selection. Create a new copy in the next Open group?'))break;
+  duplicateCatalogSelection(id);break;
+ }
+ if(ACTIVE_BRAND_ID==='tl'&&PACK?.items?.some(x=>x.id===id&&(x.tlPageReference||(x.source==='tl-chandelier'&&!x.code)))){toast('Original pages are references. Select an individual model in Discover.');break}if(!selectionForItem(id)&&!S.shortlist.includes(id)){const item=catalogItemForSelection(id);if(!item){toast('Catalog product unavailable');break}const targetRound=nextOpenSelectionRound();
+ if(!targetRound||roundFinished(targetRound)){alert('No Open selection round available. Ask Admin to start the next one.');break}
+ S.catalog[id]={...candidateEntry(item),decision:'Select',qty:1,roundId:targetRound};if(!S.shortlist.includes(id))S.shortlist.push(id)}else{
  const entry=selectionForItem(id);
  const isReviewed=entry?.decision==='Approved'||entry?.supplierStatus==='Confirmed';
  const item=catalogItemForSelection(id);
@@ -874,11 +884,16 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
  toast('Unselected · removed from My selections');
  if(MODAL?.type==='item')itemDrawer(id);else render();
  break;
-}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'newSelectionRound':createSelectionRound();break;case 'renameSelectionRound':renameSelectionRound();break;case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportDraftWithPricing':await exportDraft(true);break;case 'exportFamilies':await exportFamiliesExcel(false);break;case 'exportFamiliesWithCost':await exportFamiliesExcel(true);break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
+}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'newSelectionRound':createSelectionRound();break;case 'renameSelectionRound':renameSelectionRound();break;case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':
+ if(roundFinished(entryRoundId(candidateEntry(catalogItemForSelection(id)||{id})))){alert('Finished selections are read-only. Create a new selection copy instead.');break}
+ if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportDraftWithPricing':await exportDraft(true);break;case 'exportFamilies':await exportFamiliesExcel(false);break;case 'exportFamiliesWithCost':await exportFamiliesExcel(true);break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
 document.addEventListener('change',async e=>{if(!window.LITeamSync?.status()?.connected)return;const t=e.target;if(t.id==='packFile'&&t.files[0]){await importCatalog(t.files[0]);t.value='';return}if(t.id==='restoreFile'&&t.files[0]){await restore(t.files[0]);t.value='';return}if(t.id==='brandCatalogFiles'&&t.files.length){await uploadBrandFiles(t.files);t.value='';return}if(t.dataset.action==='productPhoto'&&t.files[0]){try{await updateManualProductPhoto(t.dataset.id,t.files[0])}catch(err){alert('Photo upload failed: '+err.message)}t.value='';return}if(t.id==='selectionRoundsActive'){S.activeRoundId=t.value==='all'?'all':selectionRounds().some(r=>r.id===t.value)?t.value:'round-1';save();render();return}
 if(t.dataset.roundKind){
  const kind=t.dataset.roundKind,id=t.dataset.id;
  const roundId=selectionRounds().some(r=>r.id===t.value)?t.value:'round-1';
+ if(roundFinished(roundId)){alert('Cannot move products into a Finished group.');renderSelected();return}
+ const previous=kind==='catalog'?selectionForItem(id):S.variants?.[id];
+ if(previous&&roundFinished(entryRoundId(previous))){alert('Finished selections are read-only.');renderSelected();return}
  if(kind==='catalog'){
   const collection=isCatalogCopy(id)?'catalogDuplicates':'catalog';
   const entry=S[collection]?.[id];if(!entry)return;
@@ -889,7 +904,7 @@ if(t.dataset.roundKind){
  }else return;
  save();window.LITeamSync?.itemChanged(kind,id);renderSelected();toast('Moved to '+roundName(roundId));return;
 }
-if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.id==='tlCatalogView'){TL_CATALOG_VIEW=t.value==='pages'?'pages':'products';KIND='all';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={};if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}const entry=S[collection][t.dataset.id];
+if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.id==='tlCatalogView'){TL_CATALOG_VIEW=t.value==='pages'?'pages':'products';KIND='all';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={};if(roundFinished(entryRoundId(S[collection][t.dataset.id]))){alert('This selection group is Finished and read-only.');render();return}if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}const entry=S[collection][t.dataset.id];
 if(t.dataset.key==='decision'&&['Select','Approved'].includes(t.value)&&!entry.roundId)entry.roundId=chosenRoundId()==='all'?'round-1':chosenRoundId();
 if(t.dataset.key==='decision'&&['Select','Approved'].includes(t.value)&&
   !['Select','Approved'].includes(entry.decision||'Review')&&
