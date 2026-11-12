@@ -891,7 +891,8 @@ async function exportTeamExcel(withCost=false){
      '<details class="li-export-choice"><summary class="btn secondary small"'+(!filtered?' aria-disabled="true"':'')+'>⬇ Export '+esc(teamExportLabel())+' ('+filtered+') ▾</summary>'+
      '<div class="li-export-menu"><button type="button" class="btn quiet small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>Without Cost</button>'+
      '<button type="button" class="btn quiet small" data-sync-action="exportTeamExcelWithCost"'+(!filtered?' disabled':'')+'>With Cost · Admin only</button></div></details>'+
-     '<button type="button" class="btn quiet small" data-sync-action="toggleTeamCosts">Show / hide costs</button>':
+     '<button type="button" class="btn quiet small" data-sync-action="toggleTeamCosts">Show / hide costs</button>'+
+     (teamBrandFilter==='lumax'?'<button type="button" class="btn secondary small" data-sync-action="updateLumaxRates" title="Recalculate all priced LM items using a new CNY/USD rate and markup">¥ LM rate / multiplier</button>':''):
      '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export '+esc(teamExportLabel())+' ('+filtered+')</button>')+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
@@ -1125,6 +1126,7 @@ async function exportTeamExcel(withCost=false){
   const visible=filteredTeamRecords().slice(0,200);
   TEAM_DUP_CANDIDATES.clear();
   preloadVisibleTeamPhotos(visible);
+  window.LISelectionCosts?.preloadSellingPrices?.(visible,()=>{if(VIEW==='team')render()});
   const header='<div class="team-list-head" aria-hidden="true"><span>Photo</span><span>Product / Supplier</span><span>Selected by</span><span>Status / Qty</span><span>Review actions</span></div>';
   const renderRow=r=>{
    const image=teamImageForRecord(r);
@@ -1184,6 +1186,7 @@ async function exportTeamExcel(withCost=false){
       (reviewed?teamReviewBadge(decision):'<span class="pill gold">'+esc(decision)+'</span>')+
       '<span class="pill">'+esc(status)+'</span></div>'+
       '<span class="team-list-qty">Qty '+esc(r.qty??'—')+'</span>'+
+      (window.LISelectionCosts?.sellingPriceMarkup?.(r)||'')+
       (['Super Admin','Admin'].includes(role)?(window.LISelectionCosts?.rowMarkup?.(r)||''):'')+'</div>'+
      '<div class="team-list-actions">'+(approve||importAction||
        '<span class="tiny">Reviewed</span>')+(approve&&importAction?importAction:'')+editQtyAction+arrangeActions+'</div>'+
@@ -1319,6 +1322,8 @@ async function exportTeamExcel(withCost=false){
   if(act==='editTeamQty')editTeamQuantity(b.dataset.recordId);
   if(act==='mergeExactDuplicates')reviewExactDuplicateGroup(b.dataset.duplicateKey,'merge');
   if(act==='keepDuplicatesSeparate')reviewExactDuplicateGroup(b.dataset.duplicateKey,'separate');
+  if(act==='updateLumaxRates'&&['Super Admin','Admin'].includes(role)&&teamBrandFilter==='lumax')
+    window.LISelectionCosts?.updateLumaxPricingFactors?.(paint).catch(err=>alert('Unable to update LM pricing: '+err.message));
   if(act==='toggleTeamCosts'&&['Super Admin','Admin'].includes(role))window.LISelectionCosts?.toggle?.(filteredTeamRecords(),paint).catch(err=>alert(err.message));
   if(act==='setCost'&&['Super Admin','Admin'].includes(role)){const target=records.find(x=>x.recordId===b.dataset.recordId);if(target)window.LISelectionCosts?.setForRecord?.(target,paint).catch(err=>alert(err.message))}if(act==='import')importShared(b.dataset.recordId);if(act==='removeShared')removeShared(b.dataset.recordId);if(act==='approve'||act==='reject')moderate(b.dataset.recordId,act);if(act==='signout'){window.LISelectionCosts?.signOut?.().catch(err=>console.warn('Supabase logout:',err));disconnect(true,true);paint()}if(act==='reconfigure'&&role==='Super Admin'){if(confirm('Change the connection settings for this device? Existing local selections will remain.')){localStorage.removeItem(KEY);config={};disconnect(false);paint()}}});
  function adminCatalogForm(){if(role!=='Super Admin')return '';return '<div class="candidate-row"><h3>Publish private supplier catalog</h3><p class="tiny">Upload the prepared JSON pack to private Google Drive once. Staff will receive its photos automatically after signing in.</p><form id="liPublishCatalog"><div class="variant-fields"><div class="field"><label>Supplier</label><select name="brandId">'+brands.map(b=>'<option value="'+esc(b.id)+'">'+esc(b.name)+'</option>').join('')+'</select></div><div class="field span2"><label>Private Drive catalog-pack link</label><input name="driveFile" required placeholder="https://drive.google.com/file/d/.../view"></div></div><label class="tiny"><input type="checkbox" name="confirmUntagged" value="1"> Confirm legacy pack without an internal brand label (Asfour)</label><div class="row-actions"><button type="submit" class="btn secondary">Publish catalog</button></div></form></div>'}
