@@ -741,14 +741,25 @@ function teamExportLabel(){
   if(teamRoundFilter==='all')return 'All groups';
   return sharedRounds.find(r=>r.brandId+'::'+r.id===teamRoundFilter)?.name||'Selected group';
 }
-function exportTeamCsv(items,scope,withCost=false,costs=[]){
+function exportTeamCsv(items,scope,withCost=false,costs=[],asfourLists=new Map()){
   // Match the supplied nine-column Team Selections workbook.
   // CSV cannot embed photos; the Product photo cells remain empty.
   const headers=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request'];
-  if(withCost)headers.push('EXW Cost RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD');
+  const asfourQuoted=withCost&&scope.brandId==='asfour';
+  if(asfourQuoted)headers.push('Confirmed Cost USD','Confirmed Cost × Qty USD','2026 Supplier List USD','2025 Supplier List USD','Change vs 2025 USD','2026 List × Qty USD');
+  else if(withCost)headers.push('EXW Cost RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD');
   const data=items.map((r,i)=>{
    const row=[r.number,'',r.code,r.description,r.original,r.requested,r.qty,r.finish,r.request];
-   if(withCost){
+   if(asfourQuoted){
+     const cost=costs[i],unit=cost?.unit_cost!=null?Number(cost.unit_cost):null,qty=Number(r.qty);
+     const listing=asfourLists.get(String(r.code||'').trim());
+     const current=listing?.list_price_2026!=null?Number(listing.list_price_2026):null;
+     const prev=listing?.list_price_2025!=null?Number(listing.list_price_2025):null;
+     row.push(Number.isFinite(unit)?unit:'',Number.isFinite(unit)&&Number.isFinite(qty)?Number((unit*qty).toFixed(2)):'',
+       Number.isFinite(current)?current:'',Number.isFinite(prev)?prev:'',
+       Number.isFinite(current)&&Number.isFinite(prev)?Number((current-prev).toFixed(2)):'',
+       Number.isFinite(current)&&Number.isFinite(qty)?Number((current*qty).toFixed(2)):'');
+   }else if(withCost){
      const cost=costs[i],unit=cost?Number(cost.unit_cost):null,qty=Number(r.qty);
      const rmb=cost?.exw_cost_cny!=null?Number(cost.exw_cost_cny):null;
      const rate=cost?.cny_per_usd!=null?Number(cost.cny_per_usd):null;
@@ -789,13 +800,18 @@ async function exportTeamExcel(withCost=false){
   exportingTeamExcel=true;
   const button=document.querySelector(withCost?'[data-sync-action="exportTeamExcelWithCost"]':'[data-sync-action="exportTeamExcel"]');
   const originalLabel=button?.textContent||'⬇ Export Excel';
-  let costData=null;
+  let costData=null,asfourLists=new Map();
+  const asfourQuoted=withCost&&scope.brandId==='asfour';
   if(button){button.disabled=true;button.textContent='Preparing Excel…'}
   try{
     // Cost data is NEVER requested for standard staff exports.
     if(withCost)costData=await window.LISelectionCosts.lookup(items.map(x=>x.record));
+    if(asfourQuoted){
+      const list=await window.LISelectionCosts.lookupListPrices(items.map(x=>x.code));
+      asfourLists=new Map(list.map(x=>[String(x.supplier_code||'').trim(),x]));
+    }
     if(!window.ExcelJS){
-      exportTeamCsv(items,scope,withCost,costData||[]);
+      exportTeamCsv(items,scope,withCost,costData||[],asfourLists);
       alert('The Excel library did not load. A CSV without photos has been downloaded instead.');
       return;
     }
@@ -815,17 +831,37 @@ async function exportTeamExcel(withCost=false){
     });
     // Match the supplied example exactly: one header row and nine columns.
     // No report title, metadata, staff, status or exported-date columns.
+    const adminHeaders=asfourQuoted?
+      ['Confirmed Cost USD','Confirmed Cost Total USD','2026 Supplier List USD','2025 Supplier List USD','2026–2025 Change USD','2026 List Total USD']:
+      ['EXW Cost RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD'];
+    const adminWidths=asfourQuoted?[{width:19},{width:23},{width:20},{width:20},{width:22},{width:23}]:
+      [{width:17},{width:15},{width:16},{width:14},{width:17},{width:20},{width:22}];
     sheet.columns=[{width:7},{width:22},{width:27},{width:35},{width:20},{width:22},{width:9},{width:23},{width:42},
-      ...(withCost?[{width:17},{width:15},{width:16},{width:14},{width:17},{width:20},{width:22}]:[])];
+      ...(withCost?adminWidths:[])];
     sheet.getRow(1).values=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request',
-      ...(withCost?['EXW Cost RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD']:[])];
+      ...(withCost?adminHeaders:[])];
     sheet.getRow(1).font={bold:true,color:{argb:'FF17304D'},size:11};
     sheet.getRow(1).alignment={vertical:'middle'};
     sheet.getRow(1).height=28;
     for(let n=0;n<items.length;n++){
       const info=items[n],i=n+2,row=sheet.getRow(i);
       row.values=[info.number,'',info.code,info.description,info.original,info.requested,info.qty,info.finish,info.request];
-      if(withCost){
+      if(asfourQuoted){
+        const cost=costData[n],unit=cost?.unit_cost!=null?Number(cost.unit_cost):null,qty=Number(info.qty);
+        const listing=asfourLists.get(String(info.code||'').trim());
+        const price2026=listing?.list_price_2026!=null?Number(listing.list_price_2026):null;
+        const price2025=listing?.list_price_2025!=null?Number(listing.list_price_2025):null;
+        row.getCell(10).value=Number.isFinite(unit)?unit:null;
+        row.getCell(11).value=Number.isFinite(unit)&&Number.isFinite(qty)?
+          {formula:'J'+i+'*G'+i,result:Number((unit*qty).toFixed(2))}:null;
+        row.getCell(12).value=Number.isFinite(price2026)?price2026:null;
+        row.getCell(13).value=Number.isFinite(price2025)?price2025:null;
+        row.getCell(14).value=Number.isFinite(price2026)&&Number.isFinite(price2025)?
+          {formula:'L'+i+'-M'+i,result:Number((price2026-price2025).toFixed(2))}:null;
+        row.getCell(15).value=Number.isFinite(price2026)&&Number.isFinite(qty)?
+          {formula:'L'+i+'*G'+i,result:Number((price2026*qty).toFixed(2))}:null;
+        for(let j=10;j<=15;j++)row.getCell(j).numFmt='"$"#,##0.00';
+      }else if(withCost){
         const cost=costData[n],unit=cost?Number(cost.unit_cost):null,qty=Number(info.qty);
         const cny=cost?.exw_cost_cny!=null?Number(cost.exw_cost_cny):null;
         const rate=cost?.cny_per_usd!=null?Number(cost.cny_per_usd):null;
@@ -853,7 +889,7 @@ async function exportTeamExcel(withCost=false){
       }
       row.height=83;
       row.alignment={vertical:'middle',wrapText:true};
-      for(let col=1;col<=(withCost?16:9);col++){
+      for(let col=1;col<=(withCost?(asfourQuoted?15:16):9);col++){
         sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
       }
       // Never embed original price-list PDFs or unapproved external URLs.
@@ -893,7 +929,7 @@ async function exportTeamExcel(withCost=false){
   }catch(err){
     console.error('Team Excel export failed',err);
     if(withCost&&!costData)alert('Secure cost lookup failed; nothing was exported.');
-    else try{exportTeamCsv(items,scope,withCost,costData||[]);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
+    else try{exportTeamCsv(items,scope,withCost,costData||[],asfourLists);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
   }finally{
     exportingTeamExcel=false;
     if(button){button.disabled=false;button.textContent=originalLabel}
