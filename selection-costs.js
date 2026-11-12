@@ -288,25 +288,25 @@
    const cnyText=prompt('LM supplier EXW cost in RMB (CNY):',existing?.exw_cost_cny??'');
    if(cnyText===null)return;
    const rmb=Number(cnyText);
-   if(!/^\\d+(?:\\.\\d{1,2})?$/.test(cnyText.trim())||!Number.isFinite(rmb)||rmb<0||rmb>100000000)
+   if(!/^\d+(?:\.\d{1,2})?$/.test(cnyText.trim())||!Number.isFinite(rmb)||rmb<0||rmb>100000000)
      return alert('Enter a nonnegative RMB amount with up to 2 decimals.');
    const rateText=prompt('Exchange rate: how many CNY per 1 USD?',String(existing?.cny_per_usd??6.6));
    if(rateText===null)return;
    const rate=Number(rateText);
-   if(!/^\\d+(?:\\.\\d{1,4})?$/.test(rateText.trim())||rate<=0||rate>1000)
+   if(!/^\d+(?:\.\d{1,4})?$/.test(rateText.trim())||rate<=0||rate>1000)
      return alert('Enter a valid rate above zero (example 6.6).');
    const factorText=prompt('Selling price multiplier (e.g. 2.75):',String(existing?.selling_multiplier??2.75));
    if(factorText===null)return;
    const factor=Number(factorText);
-   if(!/^\\d+(?:\\.\\d{1,4})?$/.test(factorText.trim())||factor<=0||factor>100)
+   if(!/^\d+(?:\.\d{1,4})?$/.test(factorText.trim())||factor<=0||factor>100)
      return alert('Enter a valid positive multiplier (example 2.75).');
    const costUSD=rmb/rate,saleUSD=costUSD*factor;
-   if(!confirm('Save LM pricing for '+(record.code||record.item?.code||k.item_id)+'?\\n'+
-      'Supplier EXW: '+format(rmb,'CNY')+'\\n'+
-      'USD cost: '+format(costUSD,'USD')+' (÷ '+rate+')\\n'+
-      'Selling price: '+format(saleUSD,'USD')+' (× '+factor+')\\n'+
+   if(!confirm('Save LM pricing for '+(record.code||record.item?.code||k.item_id)+'?\n'+
+      'Supplier EXW: '+format(rmb,'CNY')+'\n'+
+      'USD cost: '+format(costUSD,'USD')+' (÷ '+rate+')\n'+
+      'Selling price: '+format(saleUSD,'USD')+' (× '+factor+')\n'+
       (standard?'Applies to this catalog model.':'Applies only to this specific customization.')+
-      '\\nSupplier cost remains Admin-only.'))return;
+      '\nSupplier cost remains Admin-only.'))return;
    const data={...k,spec_key:exactSpec,supplier_code:String(record.code||record.item?.code||'').trim()||null,
      unit_cost:Number(costUSD.toFixed(4)),currency:'USD',exw_cost_cny:rmb,cny_per_usd:rate,
      selling_multiplier:factor,source_label:'LM Admin edited',updated_by:me.id,updated_at:new Date().toISOString()};
@@ -319,7 +319,7 @@
   const value=prompt('Supplier unit cost for this exact product/specification (USD). Leave blank to cancel.',existing?.unit_cost??'');
   if(value===null||!String(value).trim())return;
   const amount=Number(value);
-  if(!Number.isFinite(amount)||amount<0||!String(value).match(/^\\d+(?:\\.\\d{1,4})?$/))
+  if(!Number.isFinite(amount)||amount<0||!String(value).match(/^\d+(?:\.\d{1,4})?$/))
    return alert('Enter a valid nonnegative supplier cost, up to four decimals.');
   const row={...k,spec_key:exactSpec,supplier_code:String(record.code||record.item?.code||'').trim()||null,
    unit_cost:amount,currency:'USD',updated_by:me.id,updated_at:new Date().toISOString()};
@@ -335,8 +335,8 @@
   const multiplierText=prompt('New LM selling price multiplier for ALL priced LM products:', '2.75');
   if(multiplierText===null)return;
   const rate=Number(rateText),mult=Number(multiplierText);
-  if(!/^\\d+(?:\\.\\d{1,4})?$/.test(rateText.trim())||rate<=0||rate>1000||
-     !/^\\d+(?:\\.\\d{1,4})?$/.test(multiplierText.trim())||mult<=0||mult>100)
+  if(!/^\d+(?:\.\d{1,4})?$/.test(rateText.trim())||rate<=0||rate>1000||
+     !/^\d+(?:\.\d{1,4})?$/.test(multiplierText.trim())||mult<=0||mult>100)
     return alert('Enter valid positive exchange rate and multiplier (up to four decimals).');
   const {data:existing,error:readError}=await client.from(COSTS)
     .select('item_id,exw_cost_cny,cny_per_usd,selling_multiplier')
@@ -344,7 +344,7 @@
   if(readError)throw Error('Unable to check existing LM costs.');
   if(!existing?.length)return alert('No LM CNY costs to update.');
   if(!confirm('Apply '+rate+' CNY/USD and ×'+mult+' to '+existing.length+
-    ' priced LM products?\\nThis recalculates USD costs and selling prices immediately.\\n'+
+    ' priced LM products?\nThis recalculates USD costs and selling prices immediately.\n'+
     'Original RMB supplier costs will remain unchanged.'))return;
   const {data, error}=await client.from(COSTS)
    .update({cny_per_usd:rate,selling_multiplier:mult,updated_by:me.id,updated_at:new Date().toISOString()})
