@@ -250,6 +250,30 @@ function renderDiscover(){
    ${items.length>LIMIT?`<div class="catalog-more" style="text-align:center;margin:22px"><button class="btn secondary" data-action="more">Load more (${Math.min(48,items.length-LIMIT)})</button></div>`:''}`;
  window.LISelectionCosts?.preloadSellingPrices?.(priced,()=>{if(VIEW==='discover')renderDiscover()});
 }
+
+function teamSelectedIndicator(itemId){
+ const count=window.LITeamSync?.teamSelectedCount?.(ACTIVE_BRAND_ID,itemId)||0;
+ if(!Number.isSafeInteger(count)||count<1)return '';
+ const label=count===1?'Team selected':'Team selected · '+count;
+ const explanation=count===1?
+   '1 active shared Team Selection for this exact product':
+   count+' active shared Team Selection submissions for this exact product (including separate copies)';
+ return '<span class="catalog-team-selected-pill" title="'+q(explanation)+
+   '" aria-label="'+q(explanation)+'">👥 '+q(label)+'</span>';
+}
+function teamSelectedSlot(item){
+ return '<div class="catalog-team-selected-slot" data-team-item-id="'+q(item.id)+'">'+
+   teamSelectedIndicator(item.id)+'</div>';
+}
+// Team Sync refreshes in the background; update only the pills to preserve
+// Discover scrolling, search focus, and the current product-card layout.
+window.LIAppTeamSelectionsChanged=()=>{
+ if(VIEW!=='discover'||!window.LITeamSync?.status?.().connected)return;
+ document.querySelectorAll('.catalog-team-selected-slot[data-team-item-id]').forEach(slot=>{
+   slot.innerHTML=teamSelectedIndicator(slot.dataset.teamItemId);
+ });
+};
+
 function catalogCard(i){
  const added=!!S.catalog[i.id],sel=S.shortlist.includes(i.id),selected=added||sel;
  const tlPage=ACTIVE_BRAND_ID==='tl'&&(!!i.tlPageReference||(i.source==='tl-chandelier'&&!i.code));
@@ -259,7 +283,7 @@ function catalogCard(i){
  const description=tlPage?(count?count+' model labels on original page':'Source catalog page for product verification'):i.tlIndividualModel?'Supplier model from searchable PDF · verify code before ordering':editorial?'Editorial/reference page — not a coded product':(i.code?(i.name||'Chandelier'):'Visual reference only');
  return `<article class="card catalog-product-card${selected?' catalog-card-selected':''}"><div class="card-photo">${sprite(i.sprite)}<span class="float-tag">${q(label)}</span>${selected?'<span class="catalog-selected-tag" aria-label="In My selections">✓ Selected</span>':''}</div>
  <div class="card-info"><div class="card-name">${q(i.code||i.name)}</div>
- <div class="card-meta">${q(description)}</div>${window.LISelectionCosts?.listPriceMarkup?.(i.code)||''}${window.LISelectionCosts?.sellingPriceMarkup?.({...i,brandId:ACTIVE_BRAND_ID,kind:'catalog',itemId:i.id})||''}
+ <div class="card-meta">${q(description)}</div>${teamSelectedSlot(i)}${window.LISelectionCosts?.listPriceMarkup?.(i.code)||''}${window.LISelectionCosts?.sellingPriceMarkup?.({...i,brandId:ACTIVE_BRAND_ID,kind:'catalog',itemId:i.id})||''}
  ${tlPage&&i.modelCandidates?.length?`<div class="card-meta" title="OCR text — verify against photo">${q(i.modelCandidates.slice(0,3).map(m=>m.code).join(' · '))}${i.modelCandidates.length>3?' · …':''}</div>`:''}
  ${i.tlIndividualModel&&(i.photoNeedsVerification||i.modelNeedsVerification)?`<div class="card-meta" style="color:#9a6027">Verify ${i.photoNeedsVerification?'photo':'model code'}${i.photoNeedsVerification&&i.modelNeedsVerification?' and model code':''} against original page</div>`:''}
  ${String(i.dimension||'').trim()?`<div class="card-size" title="Original catalog size"><span class="card-size-label">Size</span> ${q(i.dimension)}</div>`:''}
