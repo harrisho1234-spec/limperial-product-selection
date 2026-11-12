@@ -414,12 +414,95 @@ function splitPageTools(i){
   return `<div class="candidate-row"><h3>Individual designs on this page</h3><p class="tiny">${q(current)}. Split or adjust the layout when the catalog page shows several products. Each resulting design can be selected independently.</p><div class="split-layout-tools">${options.map(([value,label])=>`<button type="button" class="btn ${original.splitLayout===value||(!original.splitParent&&value==='none')?'':'quiet'} small" data-action="splitPage" data-id="${q(parentId)}" data-layout="${value}">${label}</button>`).join('')}</div><p class="tiny">The exact supplier codes and dimensions are not verified from image-only pages. Your existing selections are never deleted automatically.</p></div>`;
 }
 
-function itemDrawer(id){const i=catalogItemForSelection(id);if(!i)return;MODAL={type:'item',id};const s=candidateEntry(i),src=PACK.sources[i.source],tlPage=ACTIVE_BRAND_ID==='tl'&&(!!i.tlPageReference||(i.source==='tl-chandelier'&&!i.code)),previous=(PACK.history||[]).filter(x=>x.code===i.code);$('drawerContent').innerHTML=`<div class="drawer-header"><div><div class="tiny">${q(src?.name||'Manual product')} ${i.page?'· PDF page '+q(i.page):''}</div><h2>${q(i.code||'Visual catalog reference')}</h2></div><button class="close" data-action="close">×</button></div><div class="drawer-body"><div class="product-hero">${photo(i.sprite)}<div><p><b>${q(i.name)}</b></p>${window.LISelectionCosts?.listPriceMarkup?.(i.code)||''}${window.LISelectionCosts?.sellingPriceMarkup?.({...i,brandId:ACTIVE_BRAND_ID,kind:'catalog',itemId:i.id})||''}<p class="muted">${q(i.dimension||'Dimensions: supplier verification needed')}</p><p><span class="pill ${i.code?'green':'warn'}">${q(i.verification)}</span></p>${previous.length?'<p class="pill warn">Previously ordered — check stock before reordering</p>':''}<p>${sourceLink(src||{})}${i.page?' · Page '+q(i.page):''}</p>${ACTIVE_BRAND_ID==='asfour'?'':`<div class="row-actions"><label class="btn secondary small">${i.sprite?'Change product photo':'＋ Add product photo'}<input type="file" data-action="productPhoto" data-id="${q(i.id)}" accept="image/png,image/jpeg,image/webp" style="display:none"></label></div>`}</div></div><div class="alert">${i.photoKind==='user-photo'?'Image uploaded for this brand; verify the supplier code and requested finish.':i.photoKind==='supplier-photo'?'Photo cropped from the supplier-code row; crystal and finish variants may share the same reference picture.':i.photoKind==='catalog-crop'?'This is one visual design cropped from a multi-product catalog page. Confirm its exact supplier code, finish and size with the supplier.':'No individually verified product photo. Add one manually or check the original catalog.'}</div>${i.splitGenerated?'<h3>Original catalog page</h3>'+photo(i.pageSprite,'preview')+'<p class="tiny">The full page is retained here to verify the source and product references.</p>':''}${tlPage?'<p class="tiny">Original catalog page for visual reference. Open Individual products in Discover to select a specific model.</p>':splitPageTools(i)}
+
+function expandableProductPhoto(s,role,label){
+ if(!s)return photo(s);
+ return '<button type="button" class="li-photo-expand-trigger" data-action="expandProductPhoto" '+
+  'data-photo-role="'+q(role)+'" aria-label="Enlarge '+q(label)+' photo">'+
+  photo(s)+'<span class="li-photo-expand-hint" aria-hidden="true">⤢ Expand photo</span></button>';
+}
+let photoZoomPreviousFocus=null;
+let photoZoomLevel=1;
+function setPhotoZoom(value){
+ const box=document.getElementById('liPhotoLightbox');
+ if(!box)return;
+ const stage=box.querySelector('.li-photo-zoom-stage'),art=box.querySelector('.li-photo-zoom-art');
+ if(!stage||!art)return;
+ const oldWidth=stage.scrollWidth||stage.clientWidth,oldHeight=stage.scrollHeight||stage.clientHeight;
+ const centerX=(stage.scrollLeft+stage.clientWidth/2)/oldWidth;
+ const centerY=(stage.scrollTop+stage.clientHeight/2)/oldHeight;
+ photoZoomLevel=Math.max(1,Math.min(4,Math.round(value*4)/4));
+ art.style.width=(photoZoomLevel*100)+'%';
+ art.style.height=(photoZoomLevel*100)+'%';
+ const output=box.querySelector('[data-photo-zoom-label]');
+ if(output)output.textContent=Math.round(photoZoomLevel*100)+'%';
+ const minus=box.querySelector('[data-photo-control="minus"]');
+ const plus=box.querySelector('[data-photo-control="plus"]');
+ if(minus)minus.disabled=photoZoomLevel<=1;
+ if(plus)plus.disabled=photoZoomLevel>=4;
+ requestAnimationFrame(()=>{
+  if(!stage.isConnected)return;
+  stage.scrollLeft=Math.max(0,stage.scrollWidth*centerX-stage.clientWidth/2);
+  stage.scrollTop=Math.max(0,stage.scrollHeight*centerY-stage.clientHeight/2);
+ });
+}
+function closePhotoLightbox(restoreFocus=true){
+ const box=document.getElementById('liPhotoLightbox');
+ if(!box)return false;
+ box.remove();
+ const previous=photoZoomPreviousFocus;
+ photoZoomPreviousFocus=null;photoZoomLevel=1;
+ if(restoreFocus&&previous?.isConnected)previous.focus({preventScroll:true});
+ return true;
+}
+function openPhotoLightbox(s,title){
+ if(!s||!window.LITeamSync?.status?.().connected)return;
+ closePhotoLightbox(false);
+ photoZoomPreviousFocus=document.activeElement;
+ photoZoomLevel=1;
+ const box=document.createElement('div');
+ box.className='li-photo-lightbox';
+ box.id='liPhotoLightbox';
+ box.setAttribute('role','dialog');
+ box.setAttribute('aria-modal','true');
+ box.setAttribute('aria-label','Enlarged photo: '+String(title||'Catalog product'));
+ box.innerHTML='<div class="li-photo-lightbox-panel">'+
+  '<div class="li-photo-lightbox-toolbar"><strong>'+q(title||'Product photo')+'</strong>'+
+  '<div class="li-photo-lightbox-controls">'+
+  '<button type="button" data-photo-control="minus" aria-label="Zoom out" disabled>−</button>'+
+  '<span data-photo-zoom-label aria-live="polite">100%</span>'+
+  '<button type="button" data-photo-control="plus" aria-label="Zoom in">＋</button>'+
+  '<button type="button" data-photo-control="reset" aria-label="Reset zoom">Reset</button>'+
+  '<button type="button" class="li-photo-lightbox-close" data-photo-control="close" aria-label="Close expanded photo">×</button>'+
+  '</div></div>'+
+  '<div class="li-photo-zoom-stage" aria-label="Enlarged catalog image; scroll to pan when zoomed">'+
+  '<div class="li-photo-zoom-art">'+sprite(s)+'</div></div>'+
+  '<p class="li-photo-lightbox-tip">Use ＋ / − or the mouse wheel to zoom. Drag or swipe to inspect when enlarged. Press Esc to close.</p>'+
+  '</div>';
+ document.body.appendChild(box);
+ box.addEventListener('click',event=>{
+  if(event.target===box){closePhotoLightbox();return}
+  const action=event.target.closest('[data-photo-control]')?.dataset.photoControl;
+  if(action==='close')closePhotoLightbox();
+  if(action==='plus')setPhotoZoom(photoZoomLevel+0.25);
+  if(action==='minus')setPhotoZoom(photoZoomLevel-0.25);
+  if(action==='reset')setPhotoZoom(1);
+ });
+ const stage=box.querySelector('.li-photo-zoom-stage');
+ stage?.addEventListener('wheel',event=>{
+  if(!event.deltaY)return;
+  event.preventDefault();
+  setPhotoZoom(photoZoomLevel+(event.deltaY<0?0.25:-0.25));
+ },{passive:false});
+ box.querySelector('[data-photo-control="close"]')?.focus({preventScroll:true});
+}
+
+function itemDrawer(id){const i=catalogItemForSelection(id);if(!i)return;MODAL={type:'item',id};const s=candidateEntry(i),src=PACK.sources[i.source],tlPage=ACTIVE_BRAND_ID==='tl'&&(!!i.tlPageReference||(i.source==='tl-chandelier'&&!i.code)),previous=(PACK.history||[]).filter(x=>x.code===i.code);$('drawerContent').innerHTML=`<div class="drawer-header"><div><div class="tiny">${q(src?.name||'Manual product')} ${i.page?'· PDF page '+q(i.page):''}</div><h2>${q(i.code||'Visual catalog reference')}</h2></div><button class="close" data-action="close">×</button></div><div class="drawer-body"><div class="product-hero">${expandableProductPhoto(i.sprite,'product',i.code||i.name||'product')}<div><p><b>${q(i.name)}</b></p>${window.LISelectionCosts?.listPriceMarkup?.(i.code)||''}${window.LISelectionCosts?.sellingPriceMarkup?.({...i,brandId:ACTIVE_BRAND_ID,kind:'catalog',itemId:i.id})||''}<p class="muted">${q(i.dimension||'Dimensions: supplier verification needed')}</p><p><span class="pill ${i.code?'green':'warn'}">${q(i.verification)}</span></p>${previous.length?'<p class="pill warn">Previously ordered — check stock before reordering</p>':''}<p>${sourceLink(src||{})}${i.page?' · Page '+q(i.page):''}</p>${ACTIVE_BRAND_ID==='asfour'?'':`<div class="row-actions"><label class="btn secondary small">${i.sprite?'Change product photo':'＋ Add product photo'}<input type="file" data-action="productPhoto" data-id="${q(i.id)}" accept="image/png,image/jpeg,image/webp" style="display:none"></label></div>`}</div></div><div class="alert">${i.photoKind==='user-photo'?'Image uploaded for this brand; verify the supplier code and requested finish.':i.photoKind==='supplier-photo'?'Photo cropped from the supplier-code row; crystal and finish variants may share the same reference picture.':i.photoKind==='catalog-crop'?'This is one visual design cropped from a multi-product catalog page. Confirm its exact supplier code, finish and size with the supplier.':'No individually verified product photo. Add one manually or check the original catalog.'}</div>${i.splitGenerated?'<h3>Original catalog page</h3>'+expandableProductPhoto(i.pageSprite,'page',i.code||i.name||'Original catalog page')+'<p class="tiny">The full page is retained here to verify the source and product references.</p>':''}${tlPage?'<p class="tiny">Original catalog page for visual reference. Open Individual products in Discover to select a specific model.</p>':splitPageTools(i)}
  ${tlPage?'':'<h3>Prepare this candidate</h3>'+candidateCard(i)}
  <div class="row-actions">${tlPage?'':`<button type="button" class="btn ${selectionForItem(i.id)||S.shortlist.includes(i.id)?'catalog-selected-btn':'secondary'}" data-action="shortlist" data-id="${q(i.id)}" aria-pressed="${selectionForItem(i.id)||S.shortlist.includes(i.id)?'true':'false'}" title="${selectionForItem(i.id)||S.shortlist.includes(i.id)?'Click to unselect':'Add to My selections'}">${selectionForItem(i.id)||S.shortlist.includes(i.id)?'× Unselect':'＋ Add to selections'}</button>`}${ACTIVE_BRAND_ID==='lumax'&&['Admin','Super Admin'].includes(window.LITeamSync?.getRoles?.()?.role)?`<button type="button" class="btn secondary" data-action="editLMItemPrice" data-id="${q(i.id)}">¥ Edit CNY pricing · Admin</button>`:''}<button class="btn quiet" data-action="close">Close</button></div></div>`;showDrawer()}
 function customDrawer(id){const f=PACK.family.find(x=>x.id===id);MODAL={type:'custom',id};$('drawerContent').innerHTML=`<div class="drawer-header"><h2>New custom version · ${q(id)}</h2><button class="close" data-action="close">×</button></div><div class="drawer-body"><p class="muted">This creates a proposed version under ${q(f?.mainCode||id)}. It is <b>not</b> confirmed by ${q(brandNow().name)}.</p><form id="newCustomForm"><div class="variant-fields"><div class="field span2"><label>Version type</label><select name="type" required><option>XL chandelier</option><option>Large chandelier</option><option>Medium chandelier</option><option>Linear chandelier</option><option>Wall lamp</option><option>Floor lamp</option><option>Table lamp</option><option>Other</option></select></div><div class="field"><label>Requested size</label><input name="size" required placeholder="L150 × W40 × H80 cm"></div><div class="field"><label>Original reference code</label><input name="code" value="${q(f?.mainCode||'')}" placeholder="Reference, not final code"></div><div class="field span2"><label>Design modifications</label><textarea name="request" placeholder="Matching arms, number of tiers, gold finish, crystal type…" required></textarea></div></div><div class="row-actions"><button class="btn" type="submit">Create custom version</button></div></form></div>`;showDrawer()}
 function compareDrawer(){const a=S.compare.slice(0,2).map(id=>PACK.items.find(x=>x.id===id)).filter(Boolean);if(a.length!==2){toast('Select two catalog candidates to compare');return}MODAL={type:'compare'};$('drawerContent').innerHTML=`<div class="drawer-header"><h2>Compare two designs</h2><button class="close" data-action="close">×</button></div><div class="drawer-body"><div class="compare-grid">${a.map(i=>`<div>${photo(i.sprite)}<p><b>${q(i.code||i.name)}</b></p><p class="tiny">${q(i.dimension||'Size not confirmed')} · ${q(PACK.sources[i.source]?.name||'Supplier catalog')}</p><p>${ACTIVE_BRAND_ID==='asfour'&&i.source==='price'?'<span class="tiny">Supplier reference · original price-list PDF not available in this app</span>':sourceLink(PACK.sources[i.source]||{})}</p></div>`).join('')}</div><div class="alert">Please compare design, room suitability, matching variants and visual similarity. Supplier availability is not implied.</div></div>`;showDrawer()}
-function showDrawer(){$('overlay').classList.remove('hidden');document.body.style.overflow='hidden'}function closeDrawer(){$('overlay').classList.add('hidden');document.body.style.overflow='';MODAL=null}
+function showDrawer(){$('overlay').classList.remove('hidden');document.body.style.overflow='hidden'}function closeDrawer(){closePhotoLightbox(false);$('overlay').classList.add('hidden');document.body.style.overflow='';MODAL=null}
 function download(name,text,type='application/json'){const blob=new Blob([text],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),15000)}
 function backup(){download('LImperial_'+brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Selections_'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({format:'limperial-selection-backup',version:2,brandId:ACTIVE_BRAND_ID,brandName:brandNow().name,when:new Date().toISOString(),state:S},null,2));toast('Selection backup downloaded for '+brandNow().name)}
 async function restore(file){try{const b=JSON.parse(await file.text());if(b.format!=='limperial-selection-backup'||!b.state)throw Error('Invalid selection backup');if((b.brandId||'asfour')!==ACTIVE_BRAND_ID)throw Error('Backup is for another brand. Open that brand first.');if(!confirm('Replace the selections stored on this browser with the backup?'))return;S=b.state;save();render();toast('Selections restored')}catch(e){alert('Restore failed: '+e.message)}}
@@ -749,7 +832,7 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
   keepViewport();
   requestAnimationFrame(keepViewport);
   break;
-}case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'item':itemDrawer(id);break;case 'editLMItemPrice':{
+}case 'splitPage':{const layout=b.dataset.layout||'none';const prefix=id+'--design-';if(Object.keys(S.catalog).some(k=>k.startsWith(prefix))){alert('This page has individually selected products. Remove those selections before changing its layout, so their identities are not mixed up.');break;}try{window.LICatalogSplit.setLayout(ACTIVE_PACK,ACTIVE_BRAND_ID,id,layout);closeDrawer();render();toast('Catalog designs updated. Each design can now be selected separately.')}catch(err){alert('Unable to split catalog page: '+err.message)}break;}case 'item':itemDrawer(id);break;case 'expandProductPhoto':{if(MODAL?.type!=='item')break;const item=catalogItemForSelection(MODAL.id);if(!item)break;const isPage=b.dataset.photoRole==='page';openPhotoLightbox(isPage?item.pageSprite:item.sprite,(item.code||item.name||'Product')+(isPage?' · Original catalog page':''));break}case 'editLMItemPrice':{
  if(ACTIVE_BRAND_ID!=='lumax')break;
  const item=catalogItemForSelection(id);
  if(!item||!window.LISelectionCosts?.setForRecord)break;
@@ -798,5 +881,5 @@ entry[t.dataset.key]=t.dataset.key==='qty'?Math.max(0,Number(t.value)||0):t.valu
 document.addEventListener('input',e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='catalogSearch'){SEARCH=e.target.value;LIMIT=48;const start=e.target.selectionStart;renderDiscover();$('catalogSearch').focus();$('catalogSearch').setSelectionRange(start,start)}if(e.target.id==='familySearch'){SEARCH=e.target.value;renderFamilies();$('familySearch').focus()}});
 document.addEventListener('submit',async e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='addBrandForm'){e.preventDefault();try{await addNewBrand(e.target)}catch(err){alert('Unable to add brand: '+err.message)}return}if(e.target.id==='newBrandProductForm'){e.preventDefault();try{await addManualProduct(e.target)}catch(err){alert('Unable to add product: '+err.message)}return}if(e.target.id==='newFamilyForm'){e.preventDefault();try{await createFamily(e.target)}catch(err){alert('Unable to create family: '+err.message)}return}if(e.target.id==='newCustomForm'){e.preventDefault();let d=new FormData(e.target),fid=MODAL?.id;if(!fid)return;const family=PACK.family.find(f=>f.id===fid);let id='CUSTOM-'+Date.now().toString(36);let v={id,familyId:fid,type:String(d.get('type')),code:String(d.get('code')),targetSize:String(d.get('size')),request:String(d.get('request')),finish:'',crystal:'',spec:'',sourceRef:'User proposed size',referenceKind:'CUSTOM DESIGN — not a supplier standard',isCustomProposal:true,supplierStatus:'Not requested',decision:'Review',qty:0,sprite:family.sprite};S.manual.push(v);save();toast('Custom version added; supplier confirmation required');familyDrawer(fid)}});
 window.LIAppAuthorized=()=>{if(VIEW==='team')VIEW='brands';render()};
-$('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))closeDrawer()});document.addEventListener('keydown',e=>{if(e.key==='Escape')closeDrawer()});$('backupTop').addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)backup()});document.querySelectorAll('#nav button').forEach(x=>x.addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)setView(x.dataset.view)}));
+$('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))closeDrawer()});document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(closePhotoLightbox())e.preventDefault();else closeDrawer()}else if(document.getElementById('liPhotoLightbox')){if(e.key==='+'||e.key==='='){e.preventDefault();setPhotoZoom(photoZoomLevel+0.25)}if(e.key==='-'){e.preventDefault();setPhotoZoom(photoZoomLevel-0.25)}if(e.key==='0'){e.preventDefault();setPhotoZoom(1)}}});$('backupTop').addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)backup()});document.querySelectorAll('#nav button').forEach(x=>x.addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)setView(x.dataset.view)}));
 (async()=>{try{DB=await openDB();const data=await tx(brandKey(ACTIVE_BRAND_ID),null,'readonly');if(data&&window.LITeamSync?.status()?.connected&&!window.LICentralCatalog?.isLocked(data))usePack(data);if(!window.LITeamSync?.status()?.connected)VIEW='team'}catch(e){console.warn('IndexedDB storage unavailable',e);VIEW='team'}window.LITeamSync?.init();render();if('serviceWorker'in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{})})();
