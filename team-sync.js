@@ -568,7 +568,7 @@ async function onSupabaseIdentity(identity){
    const options=list.map(r=>{
      const count=records.filter(x=>!x.deleted&&roundKey(x)===r.key).length;
      return '<option value="'+esc(r.key)+'"'+(teamRoundFilter===r.key?' selected':'')+'>'+
-       esc((teamBrandFilter==='all'?r.brand+' · ':'')+r.name)+' ('+count+')</option>';
+       esc((teamBrandFilter==='all'?r.brand+' · ':'')+r.name+(isFinishedTeamRound(r.brandId,r.id)?' · Finished':''))+' ('+count+')</option>';
    }).join('');
    return '<label for="liTeamRoundFilter">Selection group</label><select id="liTeamRoundFilter" aria-label="Filter by selection group">'+
      '<option value="all"'+(teamRoundFilter==='all'?' selected':'')+'>All groups</option>'+options+'</select>';
@@ -1040,7 +1040,11 @@ async function exportTeamExcel(withCost=false){
    options+'</select>'+roundFilterOptions()+
    (teamRoundsAvailable()&&['Super Admin','Admin'].includes(role)?
      '<button type="button" class="btn secondary small" data-sync-action="createTeamRound"'+(teamBrandFilter==='all'||roundsBusy?' disabled':'')+'>＋ New group</button>'+
-     '<button type="button" class="btn quiet small" data-sync-action="renameTeamRound"'+(teamRoundFilter==='all'||roundsBusy?' disabled':'')+'>Rename group</button>'+
+     '<button type="button" class="btn quiet small" data-sync-action="renameTeamRound"'+(teamRoundFilter==='all'||selectedSharedRound()?.status==='Finished'||roundsBusy?' disabled':'')+'>Rename group</button>'+
+    (lifecycleAvailable()&&selectedSharedRound()?.brandId===teamBrandFilter?
+      (selectedSharedRound()?.status==='Finished'?
+       '<button type="button" class="btn quiet small" data-sync-action="reopenTeamRound"'+(roundsBusy?' disabled':'')+'>Reopen round</button>':
+       '<button type="button" class="btn secondary small" data-sync-action="finishTeamRound"'+(roundsBusy?' disabled':'')+'>✓ Finish &amp; start next</button>'):'')+
      '<button type="button" class="btn secondary small" data-sync-action="toggleTeamOrganize">'+(organizeTeamRounds?'✓ Finish arranging':'↕ Arrange products')+'</button>'+
      '<button type="button" class="btn secondary small" data-sync-action="applyMyGroupsToTeam"'+(roundsBusy||teamBrandFilter==='all'||teamBrandFilter!==ACTIVE_BRAND_ID?' disabled':'')+
      ' title="Apply this browser\'s My Selections group assignments to matching published Team submissions">↪ Apply My Groups</button>':'')+
@@ -1430,7 +1434,7 @@ async function exportTeamExcel(withCost=false){
     '<span class="tiny">Last refreshed: '+esc(lastFetched||'—')+' · '+records.length+' records</span></div>'+
     '<p class="tiny">Authenticated staff can browse approved private supplier catalogs. Product selections and approvals remain synchronized through the existing protected Google Sheet.</p>'+ (['Super Admin','Admin'].includes(role)&&serverFeatures.teamQtyEdit!==true?'<p class="tiny">Quantity editing and duplicate review will activate after the new private Google Apps Script backend is deployed.</p>':'')+'</div>'+
     '<div class="subheading"><h2>Team review</h2><span class="tiny">Authorized users only</span></div>'+
-    teamBrandFilterToolbar()+teamGroupSyncNotice()+'<div class="row-list">'+rowsHTML()+'</div>'+adminCatalogForm();
+    teamBrandFilterToolbar()+teamRoundStatusPanel()+teamGroupSyncNotice()+'<div class="row-list">'+rowsHTML()+'</div>'+adminCatalogForm();
  }
  document.addEventListener('submit',e=>{if(e.target.id==='liSupabaseSignIn'){e.preventDefault();supabaseLogin(e.target);return}if(e.target.id==='liSyncConfigForm'){e.preventDefault();const d=new FormData(e.target);try{saveConfig({clientId:String(d.get('clientId')||''),scriptUrl:String(d.get('scriptUrl')||'')})}catch(err){alert(err.message)}return}if(e.target.id==='liOAuthClientRepair'){e.preventDefault();const d=new FormData(e.target);try{const clientId=String(d.get('clientId')||'');fixClientOpen=false;gsiClient='';saveConfig({...config,clientId})}catch(err){fixClientOpen=true;alert(err.message)}return}if(e.target.id==='liTeamAddUser'){e.preventDefault();addUser(e.target);return}if(e.target.matches('[data-team-edit-form]')){e.preventDefault();saveEditedUser(e.target);return}if(e.target.id==='liPublishCatalog'){e.preventDefault();publishCentralCatalog(e.target)}});
  document.addEventListener('toggle',event=>{
@@ -1473,6 +1477,8 @@ async function exportTeamExcel(withCost=false){
   if(act==='dismissTeamGroupNotice'){groupSyncNotice=null;paint();return}
   if(act==='createTeamRound')newSharedTeamRound();
   if(act==='renameTeamRound')renameSharedTeamRound();
+   if(act==='finishTeamRound')changeRoundLifecycle('finishAndNext');
+   if(act==='reopenTeamRound')changeRoundLifecycle('reopen');
   if(act==='toggleTeamOrganize'){organizeTeamRounds=!organizeTeamRounds;paint()}
   if(act==='teamMoveUp')reorderTeamRecord(b.dataset.recordId,'up');
   if(act==='teamMoveDown')reorderTeamRecord(b.dataset.recordId,'down');
@@ -1522,5 +1528,5 @@ async function exportTeamExcel(withCost=false){
   if(dest&&moving!==dest.recordId)placeTeamRecord(moving,teamRecordRound(dest),dest.recordId);
  });
  document.addEventListener('dragend',()=>{draggingTeamRecord=''});
- window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),getSharedSelectionRounds:(brandId)=>teamRoundsAvailable()?sharedRounds.filter(r=>r.brandId===brandId).map(r=>({id:r.id,name:r.name,shared:true})):[],teamSelectedCount,refresh,disconnect,request:call};
+ window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),getSharedSelectionRounds:(brandId)=>teamRoundsAvailable()?sharedRounds.filter(r=>r.brandId===brandId).map(r=>({id:r.id,name:r.name,shared:true,status:lifecycleAvailable()?(r.status||'Open'):'Open',finishedAt:r.finishedAt||'',finishedBy:r.finishedBy||''})):[],teamSelectedCount,refresh,disconnect,request:call};
 })();
