@@ -605,6 +605,7 @@ async function onSupabaseIdentity(identity){
    if(roundsBusy||!teamRoundsAvailable()||!['Super Admin','Admin'].includes(role))return;
    const item=records.find(r=>r.recordId===id&&!r.deleted);if(!item)return;
    if(!sharedRounds.some(r=>r.brandId===item.brandId&&r.id===roundId))return alert('Invalid group.');
+   if(isFinishedTeamRound(item.brandId,teamRecordRound(item))||isFinishedTeamRound(item.brandId,roundId))return alert('Finished groups are read-only. Reopen the group before moving items.');
    if(beforeRecordId===id)return;
    roundsBusy=true;
    try{await call('placeTeamSelection',{recordId:item.recordId,expectedRevision:item.revision,roundId,beforeRecordId});
@@ -1194,6 +1195,7 @@ async function exportTeamExcel(withCost=false){
   const refs=TEAM_DUP_CANDIDATES.get(key);if(!refs||refs.length<2)return;
   const chosen=refs.map(x=>records.find(r=>r.recordId===x.recordId&&!r.deleted));
   if(chosen.some(x=>!x)){alert('Selections changed. Refresh Team Selections first.');return}
+  if(isFinishedTeamRound(chosen[0].brandId,teamRecordRound(chosen[0])))return alert('Finished selection rounds are read-only.');
   const owner=teamOwnerName(chosen[0]),code=chosen[0].code||'this code';
   const allSame=chosen.every(r=>r.decision===chosen[0].decision&&r.supplierStatus===chosen[0].supplierStatus);
   if(action==='merge'&&!allSame){alert('These submissions have different review decisions or supplier statuses. Review them separately first.');return}
@@ -1247,7 +1249,7 @@ async function exportTeamExcel(withCost=false){
      (rejectedCount?'<span class="team-review-count team-review-count-rejected">✕ '+rejectedCount+' rejected</span>':'')+
      (pending?'<span class="team-review-count team-review-count-pending">'+pending+' pending</span>':'')+
      '</span>';
-   const duplicateReview=duplicateReviewMarkup(group);
+   const duplicateReview=isFinishedTeamRound(first.brandId,teamRecordRound(first))?'':duplicateReviewMarkup(group);
    const unreviewedDuplicateCount=teamExactDuplicateClusters(group.records).filter(c=>!c.every(r=>r.entry?.duplicateKeepSeparate===true)).length;
    const open=TEAM_DUP_OPEN.has(group.key)?TEAM_DUP_OPEN.get(group.key):different.length>0||unreviewedDuplicateCount>0;
    const differenceLabels=different.map(f=>f.label).join(', ');
@@ -1294,24 +1296,25 @@ async function exportTeamExcel(withCost=false){
    const img=image?.sprite&&typeof photo==='function'?
     photo(image.sprite,'selection-thumb',image.urls):photoPlaceholder(r);
    const brand=map.get(r.brandId)||(typeof BRANDS!=='undefined'?BRANDS.find(b=>b.id===r.brandId)?.name:null)||r.brandId;
-   const canApprove=hasRole()&&r.decision!=='Approved'&&r.decision!=='Rejected';
+   const isArchived=isFinishedTeamRound(r.brandId,teamRecordRound(r));
+   const canApprove=hasRole()&&!isArchived&&r.decision!=='Approved'&&r.decision!=='Rejected';
    const canImport=r.brandId===ACTIVE_BRAND_ID;
-   const canRemove=canRemoveShared(r);
+   const canRemove=!isArchived&&canRemoveShared(r);
    const approve=canApprove?
     '<button class="btn small" data-sync-action="approve" data-record-id="'+esc(r.recordId)+'">Approve &amp; confirm</button>'+
     '<button class="btn danger small" data-sync-action="reject" data-record-id="'+esc(r.recordId)+'">Reject</button>':'';
-   const canArrange=['Super Admin','Admin'].includes(role)&&teamRoundsAvailable();
+   const canArrange=['Super Admin','Admin'].includes(role)&&teamRoundsAvailable()&&!isArchived;
    const itemRound=teamRecordRound(r);
    const arrangeActions=canArrange&&organizeTeamRounds?
      '<div class="team-arrange-item"><label>Group <select data-team-move-round="'+esc(r.recordId)+'" aria-label="Move selection to group">'+
-     sharedRounds.filter(x=>x.brandId===r.brandId).sort((a,b)=>a.order-b.order).map(g=>
+     sharedRounds.filter(x=>x.brandId===r.brandId&&!isFinishedTeamRound(x.brandId,x.id)).sort((a,b)=>a.order-b.order).map(g=>
        '<option value="'+esc(g.id)+'"'+(g.id===itemRound?' selected':'')+'>'+esc(g.name)+'</option>').join('')+
      '</select></label><span class="team-arrange-arrows">'+
      '<button type="button" class="btn quiet small" data-sync-action="teamMoveUp" data-record-id="'+esc(r.recordId)+'" aria-label="Move earlier">↑</button>'+
      '<button type="button" class="btn quiet small" data-sync-action="teamMoveDown" data-record-id="'+esc(r.recordId)+'" aria-label="Move later">↓</button></span></div>':'';
-   const editQtyAction=['Super Admin','Admin'].includes(role)&&serverFeatures.teamQtyEdit===true?
+   const editQtyAction=!isArchived&&['Super Admin','Admin'].includes(role)&&serverFeatures.teamQtyEdit===true?
     '<button type="button" class="btn secondary small" data-sync-action="editTeamQty" data-record-id="'+esc(r.recordId)+'">Edit Qty</button>':'';
-   const importAction=canImport?
+   const importAction=canImport&&!isArchived?
     '<button class="btn quiet small" data-sync-action="import" data-record-id="'+esc(r.recordId)+'">Use in selections</button>':'';
    const removeAction=canRemove?
     '<button type="button" class="btn danger small" data-sync-action="removeShared" data-record-id="'+esc(r.recordId)+'">Remove from Team selections</button>':'';
@@ -1332,7 +1335,7 @@ async function exportTeamExcel(withCost=false){
     (specInfo?'<div class="team-list-request-details">'+specInfo+'</div>':'')+
     (removeAction?'<div class="row-actions">'+removeAction+'</div>':'')+
     '</div></details>';
-   return '<article class="team-list-row'+rowDecisionClass+'" role="listitem" data-team-record="'+esc(r.recordId)+'"'+
+   return '<article class="team-list-row'+rowDecisionClass+(isArchived?' team-list-row-finished':'')+'" role="listitem" data-team-record="'+esc(r.recordId)+'"'+
     (canArrange&&organizeTeamRounds?' draggable="true" title="Drag to reorder selection items"':'')+'>'+
     (teamRoundsAvailable()?'<div class="team-row-round-name">'+esc(teamRoundName(r.brandId,itemRound))+'</div>':'')+
     '<div class="team-list-top">'+
@@ -1359,9 +1362,10 @@ async function exportTeamExcel(withCost=false){
     const members=withRounds?visible.filter(r=>roundKey(r)===key):visible;
     if(!members.length)return '';
     const groupHeader=withRounds?'<div class="team-round-header"><b>'+esc(teamRoundName(members[0].brandId,teamRecordRound(members[0])))+
+      (isFinishedTeamRound(members[0].brandId,teamRecordRound(members[0]))?' <span class="team-round-state team-round-finished">✓ Finished</span>':'')+
       '</b><span class="tiny">'+esc(brands.find(x=>x.id===members[0].brandId)?.name||members[0].brandId)+
       ' · '+members.length+' submission'+(members.length===1?'':'s')+'</span></div>':'';
-    if(organizeTeamRounds&&['Super Admin','Admin'].includes(role))
+    if(organizeTeamRounds&&['Super Admin','Admin'].includes(role)&&!isFinishedTeamRound(members[0].brandId,teamRecordRound(members[0])))
       return groupHeader+members.map(renderRow).join('');
     const groups=teamDuplicateGroups(members);
     return groupHeader+groups.map(g=>g.records.length===1?renderRow(g.records[0]):renderTeamDuplicateGroup(g,renderRow)).join('');
