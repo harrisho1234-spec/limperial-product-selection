@@ -5,7 +5,7 @@
  const KEY='li-team-sync-client-config-v1';const SESSION_KEY='li-team-browser-session-v1';const APP_ORIGIN=location.origin;
  const DEFAULT_CONFIG={scriptUrl:'https://script.google.com/macros/s/AKfycbzlXPtmjhHpTot4R0ItabhBOQBrNamB2TUegdq6Lde-uX930U1hIohNqRsvUzMW5LYc1g/exec',clientId:'97172665640-k7lq4tqtl8jl3udei8f4f7tml8agfil4.apps.googleusercontent.com'};let config={...DEFAULT_CONFIG}; // Fixed trusted backend: never send a Supabase bearer token to a browser-configured URL.
  let iframe=null,bridgePopup=null,bridgePeer=null,bridgeOrigin='',bridgeNonce='',bridgeMode='iframe',signInStarted=false,ready=false,token='',email='',role='',displayName='';
- let records=[],brands=[],users=[],sharedRounds=[],serverFeatures={},lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
+ let records=[],brands=[],users=[],sharedRounds=[],teamSelectedCountByProduct=new Map(),serverFeatures={},lastError='',status='not-connected',reqs=new Map(),pending=0,lastFetched='',fixClientOpen=false,hasUnlockedOnce=false;
  let editingUserEmail='',userManageBusy=false,userManageNotice='',userManageIsError=false;
  let groupSyncNotice=null; // Non-authentication operation result, scoped to the affected supplier.
  const TEAM_BRAND_FILTER_KEY='li-team-brand-filter-v1';
@@ -237,9 +237,37 @@ async function onSupabaseIdentity(identity){
    if(name===record.name&&itemName===item.name)return record;
    return {...record,name,item:{...item,name:itemName}};
  }
- async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);brands=data.brands||[];users=data.users||[];sharedRounds=data.selectionRounds||[];serverFeatures=data.features||{};window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
+
+ // Discover uses the same authenticated Team Sync records as Team Review.
+ // Count active selection submissions, not quantities or distinct staff members.
+ // Match exact brand + item ID (never a supplier code that may have variants).
+ function teamSelectionKey(brandId,itemId){return String(brandId||'')+'\u001f'+String(itemId||'')}
+ function buildTeamSelectionIndex(rows){
+   const counts=new Map();
+   for(const record of rows||[]){
+     if(!record||record.deleted||String(record.kind||'').toLowerCase()!=='catalog')continue;
+     const decision=String(record.decision||record.entry?.decision||'').trim();
+     if(decision!=='Select'&&decision!=='Approved')continue;
+     const brandId=String(record.brandId||''),id=String(record.itemId||'');
+     if(!brandId||!id)continue;
+     // Saved duplicate/copy rows point back to their source model.
+     // Other page crops and model variants must NOT be grouped by code.
+     const source=String(record.item?.sourceItemId||record.entry?.sourceItemId||'');
+     const isCopy=record.item?.isSelectionCopy===true||id.startsWith('copy-');
+     const originalId=isCopy&&source&&source!==id?source:id;
+     const key=teamSelectionKey(brandId,originalId);
+     counts.set(key,(counts.get(key)||0)+1);
+   }
+   return counts;
+ }
+ function teamSelectedCount(brandId,itemId){
+   if(!statusView().connected||!brandId||!itemId)return 0;
+   return teamSelectedCountByProduct.get(teamSelectionKey(brandId,itemId))||0;
+ }
+ async function refresh(){const data=await call('list');email=data.user.email;role=data.user.role;displayName=data.user.name;records=(data.selections||[]).map(sanitizeTeamRecordPrice);teamSelectedCountByProduct=buildTeamSelectionIndex(records);brands=data.brands||[];users=data.users||[];sharedRounds=data.selectionRounds||[];serverFeatures=data.features||{};window.LICentralCatalog?.onSignedIn(data);lastFetched=new Date().toLocaleTimeString();versions.clear();for(const r of records)versions.set(r.recordId,r.revision);
   // Create lightweight brand records for shared suppliers without overwriting local private catalogs.
   const existing=new Set(BRANDS.map(x=>x.id));let changed=false;for(const b of brands){if(!existing.has(b.id)){BRANDS.push({id:b.id,name:b.name,category:b.category||'Other',shared:true});changed=true}}if(changed)persistBrandDirectory();
+  window.LIAppTeamSelectionsChanged?.();
   return data}
  function productFromLocal(r){
   // Photo references in Team selections are identifiers, not download URLs.
@@ -1427,5 +1455,5 @@ async function exportTeamExcel(withCost=false){
   if(dest&&moving!==dest.recordId)placeTeamRecord(moving,teamRecordRound(dest),dest.recordId);
  });
  document.addEventListener('dragend',()=>{draggingTeamRecord=''});
- window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),getSharedSelectionRounds:(brandId)=>teamRoundsAvailable()?sharedRounds.filter(r=>r.brandId===brandId).map(r=>({id:r.id,name:r.name,shared:true})):[],refresh,disconnect,request:call};
+ window.LITeamSync={init,render,renderTeamManagement,itemChanged,itemRemoved,localSaved,brandCreated,status:statusView,getRoles:()=>self(),getSharedSelectionRounds:(brandId)=>teamRoundsAvailable()?sharedRounds.filter(r=>r.brandId===brandId).map(r=>({id:r.id,name:r.name,shared:true})):[],teamSelectedCount,refresh,disconnect,request:call};
 })();
