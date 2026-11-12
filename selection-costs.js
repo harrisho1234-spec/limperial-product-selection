@@ -38,7 +38,7 @@
  let listPriceVisible=false,listPriceByCode=new Map();
  // Staff-safe selling prices only. Never cache RMB cost or exchange/multiplier
  // in shared product packs, localStorage, or staff-visible responses.
- let sellingByItem=new Map(),sellingRequested=new Set(),sellingPending=false,lastSellingErrorAt=0;
+ let sellingByItem=new Map(),sellingRequested=new Set(),sellingPending=false,lastSellingErrorAt=0,sellingFetchedAt=0;
  async function verifiedAccount(){
   const api=await ensureClient();
   const {data:{user}={},error}=await api.auth.getUser();
@@ -82,8 +82,18 @@
   return (!target||target===original)&&!norm(record?.request||e.request)&&
     !norm(record?.crystal||e.crystal)&&!norm(record?.finish||e.finish);
  }
- function sellingItemKey(record){
+ function sellingBaseItemKey(record){
   const k=itemKey(record);
+  const source=String(record?.sourceItemId||record?.item?.sourceItemId||'').trim();
+  // A duplicate selection is not an additional supplier model. Use its parent
+  // model's selling price unless its specification is customized.
+  if(source&&source!==k.item_id&&
+    (record?.isSelectionCopy||record?.item?.isSelectionCopy||k.item_id.includes('--copy-'))&&
+    basePriceApplicable(record))k.item_id=source;
+  return k;
+ }
+ function sellingItemKey(record){
+  const k=sellingBaseItemKey(record);
   return [k.brand_id,k.item_kind,k.item_id].join('|');
  }
  function sellingPriceMarkup(record){
@@ -96,8 +106,9 @@
  async function preloadSellingPrices(records,reread){
   if(!window.LITeamSync?.status?.().connected||sellingPending||
      Date.now()-lastSellingErrorAt<15000)return;
+  if(sellingFetchedAt&&Date.now()-sellingFetchedAt>300000)resetSellingPrices();
   const keyRows=[...new Map((records||[]).map(r=>[sellingItemKey(r),r])
-    .filter(([key,r])=>key&&itemKey(r).item_id&&itemKey(r).brand_id==='lumax'&&basePriceApplicable(r))
+    .filter(([key,r])=>key&&sellingBaseItemKey(r).item_id&&sellingBaseItemKey(r).brand_id==='lumax'&&basePriceApplicable(r))
     ).values()].filter(r=>!sellingRequested.has(sellingItemKey(r)));
   if(!keyRows.length)return;
   keyRows.forEach(r=>sellingRequested.add(sellingItemKey(r)));
@@ -105,7 +116,7 @@
   try{
    await verifiedAccount();
    const api=await ensureClient();
-   const ids=[...new Set(keyRows.map(r=>itemKey(r).item_id))];
+   const ids=[...new Set(keyRows.map(r=>sellingBaseItemKey(r).item_id))];
    const result=[];
    for(let i=0;i<ids.length;i+=60){
     const {data,error}=await api.from(SELLING_PRICES)
@@ -119,6 +130,7 @@
     if(row.spec_key!=='')continue;
     sellingByItem.set([row.brand_id,row.item_kind,row.item_id].join('|'),row);
    }
+   sellingFetchedAt=Date.now();
    reread?.();
   }catch(error){
    lastSellingErrorAt=Date.now();
@@ -127,7 +139,7 @@
   }finally{sellingPending=false}
  }
  function resetSellingPrices(){
-  sellingByItem.clear();sellingRequested.clear();lastSellingErrorAt=0;
+  sellingByItem.clear();sellingRequested.clear();lastSellingErrorAt=0;sellingFetchedAt=0;
  }
  function detailValues(record){
   const entry=record?.entry||{};
