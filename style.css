@@ -497,3 +497,18 @@ body.li-auth-unlocked .li-auth-gate{display:none}
 .team-group-sync-result li{padding:4px 0;font-size:11px;line-height:1.5;
  border-bottom:1px solid rgba(153,118,63,.12)}
 @media(max-width:650px){.team-group-sync-result{padding:9px 10px}}
+
+/* Currency conversion: staff only see selling price; private RMB/cost UI is
+   rendered exclusively after Admin verification. */
+.li-cost-row.li-selling-price{
+ display:flex;align-items:center;gap:6px;flex-wrap:wrap;
+ margin:6px 0 4px;padding:5px 9px;
+ border:1px solid #d9c7a3;background:#fff9ed;color:#6d5129;
+ border-radius:7px;font-size:11px;line-height:1.35
+}
+.li-cost-row.li-selling-price b{font-size:11px;font-weight:750}
+.team-list-state .li-selling-price{margin-top:6px;max-width:210px}
+.catalog-product-card .li-selling-price{margin:5px 0 2px;font-size:10px}
+.selection-card-copy .li-selling-price{max-width:max-content;font-size:11px}
+.li-cost-row>.tiny{display:block;padding-top:3px;line-height:1.5}
+@media(max-width:650px){.li-selling-price{font-size:10px;padding:4px 7px}}
