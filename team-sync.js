@@ -882,19 +882,26 @@ function exportTeamCsv(items,scope,withCost=false,costs=[],asfourLists=new Map()
   setTimeout(()=>URL.revokeObjectURL(url),15000);
 }
 let exportingTeamExcel=false;
-async function exportTeamExcel(withCost=false){
+async function exportTeamExcel(withCost=false,approvedOnly=false){
   if(!token||!email||!role)return alert('Sign in to export authorized team selections.');
   if(exportingTeamExcel)return;
   let scope;
   try{scope=teamExportScope()}catch(err){return alert(err.message)}
-  const items=exportTeamRows(scope);
-  if(!items.length)return alert('No team selections match the selected brand and group.');
+  if(approvedOnly){
+   const round=selectedSharedRound();
+   if(!lifecycleAvailable()||!round||round.status!=='Finished')
+     return alert('Select a Finished round before exporting the approved supplier list.');
+   scope.roundName+=' Approved Ready for Supplier';
+  }
+  const items=exportTeamRows(scope).filter(x=>!approvedOnly||
+    (x.record.decision==='Approved'&&Number(x.record.qty)>0));
+  if(!items.length)return alert('No approved items with quantity match this selection.');
   if(withCost&&!['Super Admin','Admin'].includes(role))return alert('Only Admin and Super Admin may export supplier costs.');
   if(withCost){
     if(!window.LISelectionCosts||!(await window.LISelectionCosts.requireAdmin()))return;
   }
   exportingTeamExcel=true;
-  const button=document.querySelector(withCost?'[data-sync-action="exportTeamExcelWithCost"]':'[data-sync-action="exportTeamExcel"]');
+  const button=document.querySelector(approvedOnly?'[data-sync-action="exportFinishedApproved"]':withCost?'[data-sync-action="exportTeamExcelWithCost"]':'[data-sync-action="exportTeamExcel"]');
   const originalLabel=button?.textContent||'⬇ Export Excel';
   let costData=null,asfourLists=new Map();
   const asfourQuoted=withCost&&scope.brandId==='asfour';
@@ -1056,6 +1063,8 @@ async function exportTeamExcel(withCost=false){
      '<button type="button" class="btn quiet small" data-sync-action="toggleTeamCosts">Show / hide costs</button>'+
      (teamBrandFilter==='lumax'?'<button type="button" class="btn secondary small" data-sync-action="updateLumaxRates" title="Recalculate all priced LM items using a new CNY/USD rate and markup">¥ LM rate / multiplier</button>':''):
      '<button type="button" class="btn secondary small" data-sync-action="exportTeamExcel"'+(!filtered?' disabled':'')+'>⬇ Export '+esc(teamExportLabel())+' ('+filtered+')</button>')+
+   (lifecycleAvailable()&&selectedSharedRound()?.status==='Finished'?
+     '<button type="button" class="btn secondary small" data-sync-action="exportFinishedApproved">⬇ Approved list for supplier · No costs</button>':'')+
    '<span class="tiny" role="status">Showing '+Math.min(filtered,200)+' of '+filtered+' selection'+(filtered===1?'':'s')+'</span></div>';
  }
 
@@ -1476,7 +1485,7 @@ async function exportTeamExcel(withCost=false){
     .catch(err=>{userManageIsError=true;userManageNotice='Unable to refresh users: '+err.message})
     .finally(()=>{userManageBusy=false;renderTeamManagement()});return;
   }
-  if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(false);if(act==='exportTeamExcelWithCost')exportTeamExcel(true);
+  if(act==='fixClient'){fixClientOpen=!fixClientOpen;paint();return}if(act==='retrySignIn'){connectButton(true);return}if(act==='retryConnection'){reconnectAttempts=0;if(reconnectTimer){clearTimeout(reconnectTimer);reconnectTimer=null}if(!ready&&bridgeMode==='iframe'&&iframe)iframe.dataset.liBridgeFailed='yes';authenticateCurrentToken();return}if(act==='openBridgePopup'){openBridgePopup();return}if(act==='refresh')refresh().then(()=>{status='connected';lastError='';rememberVerifiedSession();window.LICentralCatalog?.onConnected?.();paint()}).catch(err=>{status='offline';lastError='Team connection problem: '+err.message;paint();scheduleRetry()});if(act==='publish')publishCurrent();if(act==='exportTeamExcel')exportTeamExcel(false);if(act==='exportTeamExcelWithCost')exportTeamExcel(true);if(act==='exportFinishedApproved')exportTeamExcel(false,true);
   if(act==='applyMyGroupsToTeam')applyMyGroupsToTeam();
   if(act==='dismissTeamGroupNotice'){groupSyncNotice=null;paint();return}
   if(act==='createTeamRound')newSharedTeamRound();
