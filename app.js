@@ -301,6 +301,8 @@ function renderSelected(){
   '<div class="statbox"><strong>'+orderRows().length+'</strong><small>Approved and confirmed</small></div></div>'+
   selectionRoundsBar()+
   '<div class="toolbar"><button class="btn" data-action="exportDraft" '+(draftRows(active).length?'':'disabled')+' aria-label="Download '+q(draftRoundLabel(active))+' as Excel">⬇ Download '+q(draftRoundLabel(active))+' (.xlsx)</button>'+
+  (ACTIVE_BRAND_ID==='lumax'&&['Super Admin','Admin'].includes(window.LITeamSync?.getRoles?.()?.role)?
+   '<button class="btn secondary" data-action="exportDraftWithPricing" '+(draftRows(active).length?'':'disabled')+'>⬇ With RMB costing &amp; selling · Admin</button>':'')+
   '<span class="tiny">Groups organize your work; existing approval statuses and supplier confirmations remain unchanged.</span></div>'+
   (cards||'<div class="empty"><h2>No selections yet</h2><button class="btn secondary" data-action="goto" data-to="discover">Browse catalog</button></div>');
  if(ACTIVE_BRAND_ID==='lumax'){
@@ -580,42 +582,95 @@ async function exportFamiliesExcel(withCost=false){
     if(btn){btn.disabled=false;btn.textContent=label}
   }
 }
-function exportDraftCsv(rows,roundId='all'){
+function exportDraftCsv(rows,roundId='all',withCost=false,costs=[]){
   // CSV cannot embed product photos, but uses the same six informational fields as the Excel export.
-  const header=['No.','Code','Original size','Requested size','Qty','Crystal / finish','Custom request'];
+  const header=['No.','Code','Original size','Requested size','Qty','Crystal / finish','Custom request',
+    ...(withCost?['EXW RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD']:[])];
   const body=rows.map((r,i)=>{
     const e=r.entry;
-    return [i+1,e.code||'Custom reference pending',originalSizeFor(r),requestedSizeFor(r),e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
+    const base=[i+1,e.code||'Custom reference pending',originalSizeFor(r),requestedSizeFor(r),e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
+    if(!withCost)return base;
+    const cost=costs[i],rmb=cost?.exw_cost_cny!=null?Number(cost.exw_cost_cny):null;
+    const unit=cost?.unit_cost!=null?Number(cost.unit_cost):null;
+    const rate=cost?.cny_per_usd!=null?Number(cost.cny_per_usd):null;
+    const multiplier=cost?.selling_multiplier!=null?Number(cost.selling_multiplier):null;
+    const sale=cost?.selling_price_usd!=null?Number(cost.selling_price_usd):null;
+    const qty=Number(e.qty);
+    return [...base,Number.isFinite(rmb)?rmb:'',Number.isFinite(rate)?rate:'',
+      Number.isFinite(unit)?unit:'',Number.isFinite(multiplier)?multiplier:'',
+      Number.isFinite(sale)?sale:'',
+      Number.isFinite(unit)&&Number.isFinite(qty)?Number((unit*qty).toFixed(4)):'',
+      Number.isFinite(sale)&&Number.isFinite(qty)?Number((sale*qty).toFixed(2)):''];
   });
-  const csv=[header,...body].map(row=>row.map(value=>'"'+String(value??'').replaceAll('"','""')+'"').join(',')).join('\r\n');
-  download(brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_'+draftRoundFileTag(roundId)+'.csv',csv,'text/csv;charset=utf-8');
+  const csv=[header,...body].map(row=>row.map(value=>{
+    let cell=String(value??'');
+    if(/^\s*[=+@-]/.test(cell))cell="'"+cell;
+    return '"'+cell.replaceAll('"','""')+'"';
+  }).join(',')).join('\r\n');
+  download(brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_'+draftRoundFileTag(roundId)+(withCost?'_With_Pricing':'')+'.csv',csv,'text/csv;charset=utf-8');
 }
-async function exportDraft(){
+async function exportDraft(withCost=false){
   // My Selections follows the group dropdown; Order Preparation keeps its
   // existing all-groups draft behavior.
   const roundId=VIEW==='selected'?chosenRoundId():'all';
   const rows=draftRows(roundId);
   if(!rows.length){toast('No selected products to export in '+draftRoundLabel(roundId));return;}
-  if(!window.ExcelJS){exportDraftCsv(rows,roundId);toast('Excel library unavailable; downloaded '+draftRoundLabel(roundId)+' CSV instead');return;}
+  let costData=[];
+  if(withCost){
+    if(ACTIVE_BRAND_ID!=='lumax'||!['Super Admin','Admin'].includes(window.LITeamSync?.getRoles?.()?.role))
+      return alert('RMB costing exports require LM Admin access.');
+    if(!(await window.LISelectionCosts?.requireAdmin?.()))return;
+    try{
+      costData=await window.LISelectionCosts.lookup(rows.map(r=>({...r.item,
+        brandId:ACTIVE_BRAND_ID,kind:r.family==='CATALOG'?'catalog':'variant',
+        itemId:r.item.id,entry:r.entry})));
+    }catch(error){return alert('Could not retrieve private supplier costs: '+error.message)}
+  }
+  if(!window.ExcelJS){exportDraftCsv(rows,roundId,withCost,costData);toast('Excel library unavailable; downloaded '+draftRoundLabel(roundId)+' CSV instead');return;}
   try{
     const book=new ExcelJS.Workbook();
     book.creator="L'Imperial Product Selection Studio";
     const ws=book.addWorksheet('Draft Selections',{views:[{state:'frozen',ySplit:2}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}});
-    ws.mergeCells('A1:H1');
+    ws.mergeCells(withCost?'A1:O1':'A1:H1');
     ws.getCell('A1').value="L'IMPERIAL · "+brandNow().name.toUpperCase()+" · "+draftRoundLabel(roundId).toUpperCase()+" — DRAFT, NOT A PURCHASE ORDER";
     ws.getCell('A1').font={bold:true,size:14,color:{argb:'FFFFFFFF'}};
     ws.getCell('A1').fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF13233A'}};
     ws.getRow(1).height=36;
-    ws.getRow(2).values=['No.','Product photo','Code','Original size','Requested size','Qty','Crystal / finish','Custom request'];
+    ws.getRow(2).values=['No.','Product photo','Code','Original size','Requested size','Qty','Crystal / finish','Custom request',
+      ...(withCost?['EXW RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD']:[])];
     ws.getRow(2).font={bold:true,color:{argb:'FF1E324D'}};
     ws.getRow(2).height=30;
-    ws.columns=[{width:7},{width:24},{width:28},{width:24},{width:24},{width:10},{width:25},{width:48}];
+    ws.columns=[{width:7},{width:24},{width:28},{width:24},{width:24},{width:10},{width:25},{width:48},
+      ...(withCost?[{width:17},{width:14},{width:16},{width:14},{width:18},{width:20},{width:22}]:[])];
     for(let n=0;n<rows.length;n++){
       const r=rows[n],i=n+3,e=r.entry,row=ws.getRow(i);
       row.values=[n+1,'',e.code||'Custom reference pending',originalSizeFor(r),requestedSizeFor(r),e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
+      if(withCost){
+        const c=costData[n],rmb=c?.exw_cost_cny!=null?Number(c.exw_cost_cny):null;
+        const rate=c?.cny_per_usd!=null?Number(c.cny_per_usd):null;
+        const mult=c?.selling_multiplier!=null?Number(c.selling_multiplier):null;
+        const unit=c?.unit_cost!=null?Number(c.unit_cost):null;
+        const sale=c?.selling_price_usd!=null?Number(c.selling_price_usd):null;
+        const qty=Number(e.qty);
+        const hasCny=Number.isFinite(rmb)&&Number.isFinite(rate)&&rate>0&&Number.isFinite(mult)&&mult>0;
+        row.getCell(9).value=hasCny?rmb:null;
+        row.getCell(10).value=hasCny?rate:null;
+        row.getCell(11).value=hasCny?{formula:'I'+i+'/J'+i,result:Number((rmb/rate).toFixed(4))}:
+          (Number.isFinite(unit)?unit:null);
+        row.getCell(12).value=hasCny?mult:null;
+        row.getCell(13).value=hasCny?{formula:'K'+i+'*L'+i,result:Number((rmb/rate*mult).toFixed(2))}:
+          (Number.isFinite(sale)?sale:null);
+        row.getCell(14).value=Number.isFinite(unit)&&Number.isFinite(qty)?
+          {formula:'K'+i+'*F'+i,result:Number((unit*qty).toFixed(4))}:null;
+        row.getCell(15).value=Number.isFinite(sale)&&Number.isFinite(qty)?
+          {formula:'M'+i+'*F'+i,result:Number((sale*qty).toFixed(2))}:null;
+        row.getCell(9).numFmt='"¥"#,##0.00';
+        for(const c of [10,12])row.getCell(c).numFmt='0.0000';
+        for(const c of [11,13,14,15])row.getCell(c).numFmt='"$"#,##0.00';
+      }
       row.height=108;
       row.alignment={vertical:'middle',wrapText:true};
-      for(let c=1;c<=8;c++)ws.getCell(i,c).border={bottom:{style:'thin',color:{argb:'FFE5E3DF'}}};
+      for(let c=1;c<=(withCost?15:8);c++)ws.getCell(i,c).border={bottom:{style:'thin',color:{argb:'FFE5E3DF'}}};
       try{
         const pic=await imageFromSprite(r.item.sprite);
         if(pic){
@@ -628,13 +683,13 @@ async function exportDraft(){
     const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
     const url=URL.createObjectURL(blob),a=document.createElement('a');
     a.href=url;
-    a.download=brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_'+draftRoundFileTag(roundId)+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
+    a.download=brandNow().name.replace(/[^a-z0-9-]/gi,'_')+'_Draft_'+draftRoundFileTag(roundId)+(withCost?'_With_Pricing':'')+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
     document.body.appendChild(a);a.click();a.remove();
     setTimeout(()=>URL.revokeObjectURL(url),15000);
     toast('Downloaded '+rows.length+' products from '+draftRoundLabel(roundId)+' with photos');
   }catch(err){
     console.error('Draft export error',err);
-    exportDraftCsv(rows,roundId);
+    exportDraftCsv(rows,roundId,withCost,costData);
     toast('Excel export failed; downloaded '+draftRoundLabel(roundId)+' as CSV instead');
   }
 }
@@ -695,7 +750,7 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
  toast('Unselected · removed from My selections');
  if(MODAL?.type==='item')itemDrawer(id);else render();
  break;
-}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'newSelectionRound':createSelectionRound();break;case 'renameSelectionRound':renameSelectionRound();break;case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportFamilies':await exportFamiliesExcel(false);break;case 'exportFamiliesWithCost':await exportFamiliesExcel(true);break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
+}save();window.LITeamSync?.itemChanged('catalog',id);toast('Added to selections locally');if(MODAL?.type==='item')itemDrawer(id);else render();break;}case 'newSelectionRound':createSelectionRound();break;case 'renameSelectionRound':renameSelectionRound();break;case 'duplicateCandidate':duplicateCatalogSelection(id);break;case 'removeCandidate':if(!confirm('Remove this selection? Other copies of the same product will remain.'))return;window.LITeamSync?.itemRemoved('catalog',id);if(isCatalogCopy(id))delete S.catalogDuplicates[id];else delete S.catalog[id];S.shortlist=S.shortlist.filter(x=>x!==id);S.compare=S.compare.filter(x=>x!==id);save();if(MODAL?.type==='item')closeDrawer();render();break;case 'removeCustom':if(!confirm('Delete this custom proposal?'))return;S.manual=S.manual.filter(v=>v.id!==id);delete S.variants[id];save();familyDrawer(MODAL.id);break;case 'backup':backup();break;case 'exportDraft':await exportDraft();break;case 'exportDraftWithPricing':await exportDraft(true);break;case 'exportFamilies':await exportFamiliesExcel(false);break;case 'exportFamiliesWithCost':await exportFamiliesExcel(true);break;case 'exportExcel':try{await exportExcel()}catch(err){console.error('Supplier order export failed',err);alert('Excel export failed. Please use Download draft selections or try again.')}break;case 'openDrive':window.open('https://docs.google.com/spreadsheets/d/1ytiY9BOiSeNvE0sV94RzHoKUFzOCW6EQRSpJx1XgwCw/edit?gid=1628514328#gid=1628514328','_blank','noopener');break;}});
 document.addEventListener('change',async e=>{if(!window.LITeamSync?.status()?.connected)return;const t=e.target;if(t.id==='packFile'&&t.files[0]){await importCatalog(t.files[0]);t.value='';return}if(t.id==='restoreFile'&&t.files[0]){await restore(t.files[0]);t.value='';return}if(t.id==='brandCatalogFiles'&&t.files.length){await uploadBrandFiles(t.files);t.value='';return}if(t.dataset.action==='productPhoto'&&t.files[0]){try{await updateManualProductPhoto(t.dataset.id,t.files[0])}catch(err){alert('Photo upload failed: '+err.message)}t.value='';return}if(t.id==='selectionRoundsActive'){S.activeRoundId=t.value==='all'?'all':selectionRounds().some(r=>r.id===t.value)?t.value:'round-1';save();render();return}
 if(t.dataset.roundKind){
  const kind=t.dataset.roundKind,id=t.dataset.id;
