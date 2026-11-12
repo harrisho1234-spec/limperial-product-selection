@@ -745,12 +745,20 @@ function exportTeamCsv(items,scope,withCost=false,costs=[]){
   // Match the supplied nine-column Team Selections workbook.
   // CSV cannot embed photos; the Product photo cells remain empty.
   const headers=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request'];
-  if(withCost)headers.push('Unit Cost','Total Cost');
+  if(withCost)headers.push('EXW Cost RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD');
   const data=items.map((r,i)=>{
    const row=[r.number,'',r.code,r.description,r.original,r.requested,r.qty,r.finish,r.request];
    if(withCost){
      const cost=costs[i],unit=cost?Number(cost.unit_cost):null,qty=Number(r.qty);
-     row.push(cost&&Number.isFinite(unit)?unit:'',cost&&Number.isFinite(unit)&&Number.isFinite(qty)?Number((unit*qty).toFixed(4)):'');
+     const rmb=cost?.exw_cost_cny!=null?Number(cost.exw_cost_cny):null;
+     const rate=cost?.cny_per_usd!=null?Number(cost.cny_per_usd):null;
+     const mult=cost?.selling_multiplier!=null?Number(cost.selling_multiplier):null;
+     const selling=cost?.selling_price_usd!=null?Number(cost.selling_price_usd):null;
+     row.push(Number.isFinite(rmb)?rmb:'',Number.isFinite(rate)?rate:'',
+      cost&&Number.isFinite(unit)?unit:'',Number.isFinite(mult)?mult:'',
+      Number.isFinite(selling)?selling:'',
+      cost&&Number.isFinite(unit)&&Number.isFinite(qty)?Number((unit*qty).toFixed(4)):'',
+      Number.isFinite(selling)&&Number.isFinite(qty)?Number((selling*qty).toFixed(2)):'');
    }
    return row;
   });
@@ -808,9 +816,9 @@ async function exportTeamExcel(withCost=false){
     // Match the supplied example exactly: one header row and nine columns.
     // No report title, metadata, staff, status or exported-date columns.
     sheet.columns=[{width:7},{width:22},{width:27},{width:35},{width:20},{width:22},{width:9},{width:23},{width:42},
-      ...(withCost?[{width:18},{width:18}]:[])];
+      ...(withCost?[{width:17},{width:15},{width:16},{width:14},{width:17},{width:20},{width:22}]:[])];
     sheet.getRow(1).values=['No.','Product photo','Product code','Product / description','Original size','Requested size','Qty','Crystal / finish','Custom request',
-      ...(withCost?['Unit Cost','Total Cost']:[])];
+      ...(withCost?['EXW Cost RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD']:[])];
     sheet.getRow(1).font={bold:true,color:{argb:'FF17304D'},size:11};
     sheet.getRow(1).alignment={vertical:'middle'};
     sheet.getRow(1).height=28;
@@ -818,16 +826,34 @@ async function exportTeamExcel(withCost=false){
       const info=items[n],i=n+2,row=sheet.getRow(i);
       row.values=[info.number,'',info.code,info.description,info.original,info.requested,info.qty,info.finish,info.request];
       if(withCost){
-        const cost=costData[n];
-        const amount=cost?Number(cost.unit_cost):null,qty=Number(info.qty);
-        row.getCell(10).value=cost&&Number.isFinite(amount)?amount:null;
-        row.getCell(11).value=cost&&Number.isFinite(amount)&&Number.isFinite(qty)?Number((amount*qty).toFixed(4)):null;
-        row.getCell(10).numFmt='"$"#,##0.00';
-        row.getCell(11).numFmt='"$"#,##0.00';
+        const cost=costData[n],unit=cost?Number(cost.unit_cost):null,qty=Number(info.qty);
+        const cny=cost?.exw_cost_cny!=null?Number(cost.exw_cost_cny):null;
+        const rate=cost?.cny_per_usd!=null?Number(cost.cny_per_usd):null;
+        const mult=cost?.selling_multiplier!=null?Number(cost.selling_multiplier):null;
+        const sale=cost?.selling_price_usd!=null?Number(cost.selling_price_usd):null;
+        const hasCny=Number.isFinite(cny)&&Number.isFinite(rate)&&rate>0&&Number.isFinite(mult)&&mult>0;
+        row.getCell(10).value=hasCny?cny:null;
+        row.getCell(11).value=hasCny?rate:null;
+        row.getCell(12).value=hasCny?
+          {formula:'J'+i+'/K'+i,result:Number((cny/rate).toFixed(4))}:
+          (cost&&Number.isFinite(unit)?unit:null);
+        row.getCell(13).value=hasCny?mult:null;
+        row.getCell(14).value=hasCny?
+          {formula:'L'+i+'*M'+i,result:Number((cny/rate*mult).toFixed(2))}:
+          (Number.isFinite(sale)?sale:null);
+        row.getCell(15).value=cost&&Number.isFinite(unit)&&Number.isFinite(qty)?
+          {formula:'L'+i+'*G'+i,result:Number((unit*qty).toFixed(4))}:null;
+        row.getCell(16).value=Number.isFinite(sale)&&Number.isFinite(qty)?
+          {formula:'N'+i+'*G'+i,result:Number((sale*qty).toFixed(2))}:null;
+        row.getCell(10).numFmt='"¥"#,##0.00';
+        row.getCell(11).numFmt='0.0000';
+        row.getCell(12).numFmt='"$"#,##0.00';
+        row.getCell(13).numFmt='0.0000';
+        for(const c of [14,15,16])row.getCell(c).numFmt='"$"#,##0.00';
       }
       row.height=83;
       row.alignment={vertical:'middle',wrapText:true};
-      for(let col=1;col<=(withCost?11:9);col++){
+      for(let col=1;col<=(withCost?16:9);col++){
         sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
       }
       // Never embed original price-list PDFs or unapproved external URLs.
