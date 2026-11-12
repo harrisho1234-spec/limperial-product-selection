@@ -881,5 +881,23 @@ entry[t.dataset.key]=t.dataset.key==='qty'?Math.max(0,Number(t.value)||0):t.valu
 document.addEventListener('input',e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='catalogSearch'){SEARCH=e.target.value;LIMIT=48;const start=e.target.selectionStart;renderDiscover();$('catalogSearch').focus();$('catalogSearch').setSelectionRange(start,start)}if(e.target.id==='familySearch'){SEARCH=e.target.value;renderFamilies();$('familySearch').focus()}});
 document.addEventListener('submit',async e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='addBrandForm'){e.preventDefault();try{await addNewBrand(e.target)}catch(err){alert('Unable to add brand: '+err.message)}return}if(e.target.id==='newBrandProductForm'){e.preventDefault();try{await addManualProduct(e.target)}catch(err){alert('Unable to add product: '+err.message)}return}if(e.target.id==='newFamilyForm'){e.preventDefault();try{await createFamily(e.target)}catch(err){alert('Unable to create family: '+err.message)}return}if(e.target.id==='newCustomForm'){e.preventDefault();let d=new FormData(e.target),fid=MODAL?.id;if(!fid)return;const family=PACK.family.find(f=>f.id===fid);let id='CUSTOM-'+Date.now().toString(36);let v={id,familyId:fid,type:String(d.get('type')),code:String(d.get('code')),targetSize:String(d.get('size')),request:String(d.get('request')),finish:'',crystal:'',spec:'',sourceRef:'User proposed size',referenceKind:'CUSTOM DESIGN — not a supplier standard',isCustomProposal:true,supplierStatus:'Not requested',decision:'Review',qty:0,sprite:family.sprite};S.manual.push(v);save();toast('Custom version added; supplier confirmation required');familyDrawer(fid)}});
 window.LIAppAuthorized=()=>{if(VIEW==='team')VIEW='brands';render()};
-$('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))closeDrawer()});document.addEventListener('keydown',e=>{if(e.key==='Escape'){if(closePhotoLightbox())e.preventDefault();else closeDrawer()}else if(document.getElementById('liPhotoLightbox')){if(e.key==='+'||e.key==='='){e.preventDefault();setPhotoZoom(photoZoomLevel+0.25)}if(e.key==='-'){e.preventDefault();setPhotoZoom(photoZoomLevel-0.25)}if(e.key==='0'){e.preventDefault();setPhotoZoom(1)}}});$('backupTop').addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)backup()});document.querySelectorAll('#nav button').forEach(x=>x.addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)setView(x.dataset.view)}));
+$('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))closeDrawer()});document.addEventListener('keydown',e=>{
+ const lightbox=document.getElementById('liPhotoLightbox');
+ if(e.key==='Escape'){if(closePhotoLightbox())e.preventDefault();else closeDrawer();return}
+ if(!lightbox)return;
+ if(e.key==='Tab'){
+  const buttons=[...lightbox.querySelectorAll('button:not(:disabled)')];
+  if(!buttons.length)return;
+  const first=buttons[0],last=buttons[buttons.length-1];
+  if(!lightbox.contains(document.activeElement)||e.shiftKey&&document.activeElement===first){
+   e.preventDefault();(e.shiftKey?last:first).focus();
+  }else if(!e.shiftKey&&document.activeElement===last){
+   e.preventDefault();first.focus();
+  }
+  return;
+ }
+ if(e.key==='+'||e.key==='='){e.preventDefault();setPhotoZoom(photoZoomLevel+0.25)}
+ if(e.key==='-'){e.preventDefault();setPhotoZoom(photoZoomLevel-0.25)}
+ if(e.key==='0'){e.preventDefault();setPhotoZoom(1)}
+});$('backupTop').addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)backup()});document.querySelectorAll('#nav button').forEach(x=>x.addEventListener('click',()=>{if(window.LITeamSync?.status()?.connected)setView(x.dataset.view)}));
 (async()=>{try{DB=await openDB();const data=await tx(brandKey(ACTIVE_BRAND_ID),null,'readonly');if(data&&window.LITeamSync?.status()?.connected&&!window.LICentralCatalog?.isLocked(data))usePack(data);if(!window.LITeamSync?.status()?.connected)VIEW='team'}catch(e){console.warn('IndexedDB storage unavailable',e);VIEW='team'}window.LITeamSync?.init();render();if('serviceWorker'in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(()=>{})})();
