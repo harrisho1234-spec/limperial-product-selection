@@ -812,13 +812,18 @@ async function onSupabaseIdentity(identity){
     const entry=record.entry||{},item=record.item||{};
     const original=String(record.dimension||item.dimension||entry.originalSize||'').trim();
     const requested=String(record.targetSize||entry.targetSize||'').trim();
+    // Family designs carry a single explicit Size value; their individual
+    // variants remain separate rows, with no parent-family summary row.
+    const isFamily=String(record.kind||'').toLowerCase()==='variant';
+    const size=isFamily?String(record.targetSize||entry.targetSize||item.targetSize||
+      record.dimension||item.originalSize||item.supplierSize||item.dimension||entry.originalSize||'').trim():'';
     const brand=brands.find(b=>b.id===record.brandId)
       ||(typeof BRANDS!=='undefined'?BRANDS.find(b=>b.id===record.brandId):null);
     return {
       number:index+1,record,brand:brand?.name||record.brandId||'',
       code:String(record.code||entry.code||item.code||''),
       description:String(record.name||item.name||item.type||''),
-      original,requested:requested&&requested!==original?requested:'',
+      original:isFamily?'':original,requested:isFamily?size:(requested&&requested!==original?requested:''),
       qty:record.qty??entry.qty??'',
       finish:[record.crystal||entry.crystal,record.finish||entry.finish].filter(Boolean).join(' / '),
       request:String(record.request||entry.request||record.notes||''),
@@ -990,14 +995,17 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
         row.getCell(13).numFmt='0.0000';
         for(const c of [14,15,16])row.getCell(c).numFmt='"$"#,##0.00';
       }
-      row.height=83;
+      row.height=String(info.record.kind||'').toLowerCase()==='variant'?31:83;
       row.alignment={vertical:'middle',wrapText:true};
       for(let col=1;col<=(withCost?(asfourQuoted?15:16):9);col++){
         sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
       }
       // Never embed original price-list PDFs or unapproved external URLs.
       // A missing approved image leaves an empty cell, as in the example.
-      const image=teamImageForRecord(info.record);
+      // Family designs remain a compact single row with Size instead of a
+      // large photo block. Catalog products keep their usual image export.
+      const image=String(info.record.kind||'').toLowerCase()==='variant'?
+        null:teamImageForRecord(info.record);
       if(image?.sprite&&typeof imageFromSprite==='function'){
         try{
           const data=await imageFromSprite(image.sprite,image.urls);
