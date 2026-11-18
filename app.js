@@ -692,13 +692,18 @@ async function exportFamiliesExcel(withCost=false){
   if(btn){btn.disabled=false;btn.textContent=label}
  }
 }
+function selectionExportSizes(r){
+ if(r.family==='CATALOG')return {original:originalSizeFor(r),requested:requestedSizeFor(r)};
+ return {original:'',requested:familyExportSize(r.item,r.entry)};
+}
 function exportDraftCsv(rows,roundId='all',withCost=false,costs=[]){
   // CSV cannot embed product photos, but uses the same six informational fields as the Excel export.
   const header=['No.','Code','Original size','Requested size','Qty','Crystal / finish','Custom request',
     ...(withCost?['EXW RMB','CNY / USD','Cost USD','Selling ×','Selling USD','Total Cost USD','Total Selling USD']:[])];
   const body=rows.map((r,i)=>{
     const e=r.entry;
-    const base=[i+1,e.code||'Custom reference pending',originalSizeFor(r),requestedSizeFor(r),e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
+    const size=selectionExportSizes(r);
+    const base=[i+1,e.code||'Custom reference pending',size.original,size.requested,e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
     if(!withCost)return base;
     const cost=costs[i],rmb=cost?.exw_cost_cny!=null?Number(cost.exw_cost_cny):null;
     const unit=cost?.unit_cost!=null?Number(cost.unit_cost):null;
@@ -754,7 +759,8 @@ async function exportDraft(withCost=false){
       ...(withCost?[{width:17},{width:14},{width:16},{width:14},{width:18},{width:20},{width:22}]:[])];
     for(let n=0;n<rows.length;n++){
       const r=rows[n],i=n+3,e=r.entry,row=ws.getRow(i);
-      row.values=[n+1,'',e.code||'Custom reference pending',originalSizeFor(r),requestedSizeFor(r),e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
+      const size=selectionExportSizes(r);
+      row.values=[n+1,'',e.code||'Custom reference pending',size.original,size.requested,e.qty??'',[e.crystal,e.finish].filter(Boolean).join(' / '),e.request||''];
       if(withCost){
         const c=costData[n],rmb=c?.exw_cost_cny!=null?Number(c.exw_cost_cny):null;
         const rate=c?.cny_per_usd!=null?Number(c.cny_per_usd):null;
@@ -778,10 +784,13 @@ async function exportDraft(withCost=false){
         for(const c of [10,12])row.getCell(c).numFmt='0.0000';
         for(const c of [11,13,14,15])row.getCell(c).numFmt='"$"#,##0.00';
       }
-      row.height=108;
+      row.height=r.family==='CATALOG'?108:34;
       row.alignment={vertical:'middle',wrapText:true};
       for(let c=1;c<=(withCost?15:8);c++)ws.getCell(i,c).border={bottom:{style:'thin',color:{argb:'FFE5E3DF'}}};
       try{
+        // Family design variations export as a compact line with Size only,
+        // while ordinary catalog products retain their photo thumbnails.
+        if(r.family!=='CATALOG')continue;
         const pic=await imageFromSprite(r.item.sprite);
         if(pic){
           const picId=book.addImage({base64:pic,extension:'png'});
