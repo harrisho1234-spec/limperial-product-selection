@@ -562,151 +562,135 @@ function safeCsvCell(value){
   if(/^\s*[=+\-@]/.test(s))s="'"+s;
   return '"'+s.replaceAll('"','""')+'"';
 }
+
+function familyExportSize(variant,entry){
+ const preferred=String(entry?.targetSize||variant?.targetSize||'').trim();
+ const original=String(variant?.originalSize||variant?.supplierSize||variant?.dimension||'').trim();
+ return preferred||original;
+}
+function familyExportLines(versions,families){
+ const lookup=new Map(families.map(f=>[f.id,f]));
+ // Each actual design/version is ONE row, including variants with the same
+ // family code but different size. Do not export blank parent-family rows.
+ return versions.map((v,index)=>{
+  const f=lookup.get(v.familyId),e=variantEntry(v);
+  return {no:index+1,variant:v,entry:e,
+   family:String(f?.mainCode||f?.name||v.familyId||''),
+   type:String(v.type||f?.style||''),
+   code:String(e.code||v.code||'').trim(),
+   size:familyExportSize(v,e),
+   qty:e.qty??'',
+   finish:e.finish||'',crystal:e.crystal||'',
+   decision:e.decision||'Review',
+   supplierStatus:e.supplierStatus||'Not requested',
+   request:e.request||''};
+ });
+}
+function familyExportCells(r){
+ return [r.no,r.family,r.type,r.code,r.size,r.qty,r.finish,r.crystal,r.decision,r.supplierStatus,r.request];
+}
 function exportFamiliesCsv(families,versions,withCost=false,costData=[]){
-  const byFamily=new Map();
-  for(const v of versions){if(!byFamily.has(v.familyId))byFamily.set(v.familyId,[]);byFamily.get(v.familyId).push(v)}
-  const headers=['Family ID','Family name / main code','Family type','Version type','Reference code','Original reference size','Requested size','Finish','Crystal','Decision','Supplier status','Qty','Custom request'];
-  if(withCost)headers.push('Unit Cost','Total Cost');
-  const rows=[headers],costById=new Map(versions.map((v,i)=>[v.id,costData[i]]));
-  for(const f of families){
-    const variants=byFamily.get(f.id)||[null];
-    for(const v of variants){
-      const e=v?variantEntry(v):null;
-      const row=[f.id,f.mainCode||f.name,f.style||'Preferred design',v?.type||'',e?.code||v?.code||'',v?.originalSize||v?.supplierSize||v?.dimension||'',e?.targetSize||'',e?.finish||'',e?.crystal||'',e?.decision||'',e?.supplierStatus||'',e?.qty??'',e?.request||''];
-      if(withCost){
-        const cost=v?costById.get(v.id):null,unit=cost?Number(cost.unit_cost):null,qty=Number(e?.qty);
-        row.push(cost&&Number.isFinite(unit)?unit:'',cost&&Number.isFinite(unit)&&Number.isFinite(qty)?Number((unit*qty).toFixed(4)):'');
-      }
-      rows.push(row);
-    }
+ const lines=familyExportLines(versions,families);
+ const headers=['No.','Family / Design','Design type','Product code','Size','Qty','Finish','Crystal','Decision','Supplier status','Custom request'];
+ if(withCost)headers.push('Unit Cost USD','Total Cost USD');
+ const rows=[headers];
+ for(let n=0;n<lines.length;n++){
+  const r=lines[n],cells=familyExportCells(r);
+  if(withCost){
+   const cost=costData[n],unit=cost?.unit_cost==null?null:Number(cost.unit_cost);
+   const qty=Number(r.qty);
+   cells.push(Number.isFinite(unit)?unit:'',Number.isFinite(unit)&&Number.isFinite(qty)?Number((unit*qty).toFixed(4)):'');
   }
-  download(safeExportFileBase()+(withCost?'_With_Cost':'')+'.csv','\uFEFF'+rows.map(r=>r.map(safeCsvCell).join(',')).join('\r\n'),'text/csv;charset=utf-8');
+  rows.push(cells);
+ }
+ download(safeExportFileBase()+(withCost?'_With_Cost':'')+'.csv',
+  '\uFEFF'+rows.map(row=>row.map(safeCsvCell).join(',')).join('\r\n'),'text/csv;charset=utf-8');
 }
 let exportingFamiliesExcel=false;
 async function exportFamiliesExcel(withCost=false){
-  if(!window.LITeamSync?.status()?.connected)return toast('Sign in to export Design families');
-  if(exportingFamiliesExcel)return;
-  const {families,versions}=visibleFamilyExportData();
-  if(!families.length)return toast('No design families match the current search');
-  if(withCost){
-    if(!['Super Admin','Admin'].includes(window.LITeamSync?.getRoles?.()?.role))return toast('Admin access required.');
-    if(!window.LISelectionCosts||!(await window.LISelectionCosts.requireAdmin()))return;
+ if(!window.LITeamSync?.status()?.connected)return toast('Sign in to export Design families');
+ if(exportingFamiliesExcel)return;
+ const {families,versions}=visibleFamilyExportData();
+ const lines=familyExportLines(versions,families);
+ if(!lines.length)return toast('No family design versions match this search');
+ if(withCost){
+  if(!['Super Admin','Admin'].includes(window.LITeamSync?.getRoles?.()?.role))return toast('Admin access required.');
+  if(!window.LISelectionCosts||!(await window.LISelectionCosts.requireAdmin()))return;
+ }
+ const btn=document.querySelector(withCost?'[data-action="exportFamiliesWithCost"]':'[data-action="exportFamilies"]');
+ const label=btn?.textContent||'⬇ Export Excel';
+ exportingFamiliesExcel=true;
+ let costData=null;
+ if(btn){btn.disabled=true;btn.textContent='Preparing Excel…'}
+ try{
+  // Price lookup is restricted to Admin; ordinary staff exports carry NO costs.
+  if(withCost)costData=await window.LISelectionCosts.lookup(versions.map(v=>({
+   brandId:ACTIVE_BRAND_ID,kind:'variant',itemId:v.id,entry:variantEntry(v)
+  })));
+  if(!window.ExcelJS){
+   exportFamiliesCsv(families,versions,withCost,costData||[]);
+   toast('Excel library unavailable; exported a flat CSV of family designs');
+   return;
   }
-  const btn=document.querySelector(withCost?'[data-action="exportFamiliesWithCost"]':'[data-action="exportFamilies"]');
-  const label=btn?.textContent||'⬇ Export Excel';
-  exportingFamiliesExcel=true;
-  let costData=null;
-  if(btn){btn.disabled=true;btn.textContent='Preparing Excel…'}
-  try{
-    // Staff exports never load or serialize confidential supplier-cost data.
-    if(withCost)costData=await window.LISelectionCosts.lookup(versions.map(v=>({
-      brandId:ACTIVE_BRAND_ID,kind:'variant',itemId:v.id,entry:variantEntry(v)
-    })));
-    if(!window.ExcelJS){
-      exportFamiliesCsv(families,versions,withCost,costData||[]);
-      toast('Excel library unavailable; downloaded CSV without photos');
-      return;
-    }
-    const book=new window.ExcelJS.Workbook();
-    book.creator="L'Imperial Product Selection Studio";
-    const navy={argb:'FF13233A'},white={argb:'FFFFFFFF'},ink={argb:'FF213951'},line={argb:'FFE5E3DF'};
-    const sheet=(name,headers,widths)=>{
-      const ws=book.addWorksheet(name,{views:[{state:'frozen',ySplit:3}],pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}});
-      ws.columns=widths.map(width=>({width}));
-      const max=String.fromCharCode(64+headers.length);
-      ws.mergeCells('A1:'+max+'1');
-      const h=ws.getCell('A1');
-      h.value="L'IMPERIAL · "+brandNow().name.toUpperCase()+" · "+name.toUpperCase();
-      h.font={bold:true,size:15,color:white};
-      h.fill={type:'pattern',pattern:'solid',fgColor:navy};
-      ws.getRow(1).height=34;
-      ws.mergeCells('A2:'+max+'2');
-      const info=ws.getCell('A2');
-      info.value=withCost?'Confidential Admin cost export · Not a purchase order':'Reference only · Photos from the authorized catalog · Supplier prices excluded · Not a purchase order';
-      info.font={italic:true,size:10,color:{argb:'FF65748A'}};
-      ws.getRow(2).height=22;
-      ws.getRow(3).values=headers;
-      ws.getRow(3).font={bold:true,size:10,color:ink};
-      ws.getRow(3).height=27;
-      ws.autoFilter={from:{row:3,column:1},to:{row:3,column:headers.length}};
-      return ws;
-    };
-    const fam=sheet('Design Families',
-      ['No.','Family photo','Family ID','Main code / name','Family style','Variants','Selected / approved'],
-      [7,24,17,31,27,13,22]);
-    const ver=sheet('Family Versions',
-      ['No.','Photo','Family ID','Main family code','Version type','Reference code','Original size','Requested size','Finish','Crystal','Decision','Supplier status','Qty','Custom instructions',
-       ...(withCost?['Unit Cost','Total Cost']:[])],
-      [7,24,16,27,25,27,25,24,19,18,17,20,9,46,...(withCost?[16,18]:[])]);
-    const familyMap=new Map(families.map(f=>[f.id,f]));
-    const versionCount=new Map(),chosenCount=new Map();
-    for(const v of versions){
-      versionCount.set(v.familyId,(versionCount.get(v.familyId)||0)+1);
-      if(['Select','Approved'].includes(variantEntry(v).decision))
-        chosenCount.set(v.familyId,(chosenCount.get(v.familyId)||0)+1);
-    }
-    const addPhoto=async(ws,rowIndex,sprite,column,width=104,height=104)=>{
-      if(!sprite){ws.getCell(rowIndex,column).value='Photo unavailable';return}
-      try{
-        const png=await imageFromSprite(sprite);
-        if(!png){ws.getCell(rowIndex,column).value='Photo unavailable';return}
-        const id=book.addImage({base64:png,extension:'png'});
-        ws.addImage(id,{tl:{col:column-1+0.08,row:rowIndex-1+0.05},ext:{width,height},editAs:'oneCell'});
-      }catch(_){ws.getCell(rowIndex,column).value='Photo unavailable'}
-    };
-    const finishRow=(ws,rowIndex,columns)=>{
-      const row=ws.getRow(rowIndex);
-      row.height=84;
-      row.alignment={vertical:'middle',wrapText:true};
-      for(let column=1;column<=columns;column++){
-        const cell=ws.getCell(rowIndex,column);
-        cell.border={bottom:{style:'thin',color:line}};
-      }
-      if(rowIndex%2===0){
-        for(let column=1;column<=columns;column++){
-          ws.getCell(rowIndex,column).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF9F8F5'}};
-        }
-      }
-    };
-    for(let n=0;n<families.length;n++){
-      const f=families[n],i=n+4;
-      fam.getRow(i).values=[n+1,'',f.id,f.mainCode||f.name,f.style||'Preferred design',
-        versionCount.get(f.id)||0,chosenCount.get(f.id)||0];
-      finishRow(fam,i,7);
-      await addPhoto(fam,i,f.sprite,2,105,105);
-    }
-    for(let n=0;n<versions.length;n++){
-      const v=versions[n],i=n+4,e=variantEntry(v),f=familyMap.get(v.familyId);
-      ver.getRow(i).values=[n+1,'',v.familyId,f?.mainCode||f?.name||'',
-        v.type||'',e.code||v.code||'',
-        v.originalSize||v.supplierSize||v.dimension||'',
-        e.targetSize||'',e.finish||'',e.crystal||'',e.decision||'Review',
-        e.supplierStatus||'Not requested',e.qty??0,e.request||''];
-      if(withCost){
-        const cost=costData[n],amount=cost?Number(cost.unit_cost):null,qty=Number(e.qty);
-        ver.getCell(i,15).value=cost&&Number.isFinite(amount)?amount:null;
-        ver.getCell(i,16).value=cost&&Number.isFinite(amount)&&Number.isFinite(qty)?Number((amount*qty).toFixed(4)):null;
-        ver.getCell(i,15).numFmt='"$"#,##0.00';
-        ver.getCell(i,16).numFmt='"$"#,##0.00';
-      }
-      finishRow(ver,i,withCost?16:14);
-      await addPhoto(ver,i,v.sprite||f?.sprite,2,105,105);
-    }
-    const data=await book.xlsx.writeBuffer();
-    const blob=new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
-    const url=URL.createObjectURL(blob),link=document.createElement('a');
-    link.href=url;link.download=safeExportFileBase()+(withCost?'_With_Cost':'')+'.xlsx';
-    document.body.appendChild(link);link.click();link.remove();
-    setTimeout(()=>URL.revokeObjectURL(url),15000);
-    toast('Exported '+families.length+' families and '+versions.length+' versions with photos');
-  }catch(err){
-    console.error('Design families export failed',err);
-    if(withCost&&!costData)toast('Secure cost lookup failed; no cost export was generated.');
-    else {exportFamiliesCsv(families,versions,withCost,costData||[]);toast('Excel export failed; downloaded CSV without photos')}
-  }finally{
-    exportingFamiliesExcel=false;
-    if(btn){btn.disabled=false;btn.textContent=label}
+  const book=new window.ExcelJS.Workbook();
+  book.creator="L'Imperial Product Selection Studio";
+  const ws=book.addWorksheet('Family Designs',{
+   views:[{state:'frozen',ySplit:3}],
+   pageSetup:{orientation:'landscape',fitToPage:true,fitToWidth:1}
+  });
+  const headers=['No.','Family / Design','Design type','Product code','Size','Qty','Finish','Crystal','Decision','Supplier status','Custom request',
+   ...(withCost?['Unit Cost USD','Total Cost USD']:[])];
+  ws.columns=[{width:7},{width:31},{width:23},{width:28},{width:30},{width:10},{width:18},
+   {width:18},{width:17},{width:20},{width:46},...(withCost?[{width:18},{width:20}]:[])];
+  const lastCol=String.fromCharCode(64+headers.length);
+  ws.mergeCells('A1:'+lastCol+'1');
+  ws.getCell('A1').value="L'IMPERIAL · "+brandNow().name.toUpperCase()+" · FAMILY DESIGNS";
+  ws.getCell('A1').font={bold:true,size:14,color:{argb:'FFFFFFFF'}};
+  ws.getCell('A1').fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF13233A'}};
+  ws.getRow(1).height=33;
+  ws.mergeCells('A2:'+lastCol+'2');
+  ws.getCell('A2').value=withCost?
+   'Confidential Admin cost export · One design and size per row · Not a purchase order':
+   'One design and size per row · Supplier costs excluded · Not a purchase order';
+  ws.getCell('A2').font={italic:true,size:10,color:{argb:'FF65748A'}};
+  ws.getRow(2).height=22;
+  ws.getRow(3).values=headers;
+  ws.getRow(3).font={bold:true,color:{argb:'FF213951'}};
+  ws.getRow(3).height=26;
+  ws.autoFilter={from:{row:3,column:1},to:{row:3,column:headers.length}};
+  for(let n=0;n<lines.length;n++){
+   const item=lines[n],i=n+4,row=ws.getRow(i);
+   row.values=familyExportCells(item);
+   if(withCost){
+    const cost=costData[n],unit=cost?.unit_cost==null?null:Number(cost.unit_cost),qty=Number(item.qty);
+    row.getCell(12).value=Number.isFinite(unit)?unit:null;
+    row.getCell(13).value=Number.isFinite(unit)&&Number.isFinite(qty)?
+     {formula:'L'+i+'*F'+i,result:Number((unit*qty).toFixed(4))}:null;
+    row.getCell(12).numFmt='"$"#,##0.00';
+    row.getCell(13).numFmt='"$"#,##0.00';
+   }
+   row.height=31;row.alignment={vertical:'middle',wrapText:true};
+   for(let col=1;col<=headers.length;col++){
+    const cell=row.getCell(col);
+    cell.border={bottom:{style:'thin',color:{argb:'FFE5E3DF'}}};
+    if(n%2===1)cell.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFF9F8F5'}};
+   }
   }
+  const data=await book.xlsx.writeBuffer();
+  const blob=new Blob([data],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const url=URL.createObjectURL(blob),link=document.createElement('a');
+  link.href=url;link.download=safeExportFileBase()+(withCost?'_With_Cost':'')+'.xlsx';
+  document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),15000);
+  toast('Exported '+lines.length+' family design rows with sizes');
+ }catch(err){
+  console.error('Design families export failed',err);
+  if(withCost&&!costData)toast('Secure cost lookup failed; no cost export was generated.');
+  else{exportFamiliesCsv(families,versions,withCost,costData||[]);toast('Excel export failed; downloaded flat CSV instead')}
+ }finally{
+  exportingFamiliesExcel=false;
+  if(btn){btn.disabled=false;btn.textContent=label}
+ }
 }
 function exportDraftCsv(rows,roundId='all',withCost=false,costs=[]){
   // CSV cannot embed product photos, but uses the same six informational fields as the Excel export.
