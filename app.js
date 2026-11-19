@@ -337,23 +337,24 @@ function familySelectionPicker(){
 }
 function filterFamilySelectionPicker(){
  const term=String($('familyPickerSearch')?.value||'').trim().toLowerCase(),scope=$('familyPickerScope')?.value||'all';
- document.querySelectorAll('.family-picker-group').forEach(el=>{el.hidden=(scope!=='all'&&el.dataset.familyScope!==scope)||!el.dataset.familySearch.includes(term)});
+ document.querySelectorAll('.family-picker-group').forEach(el=>{el.style.display=((scope!=='all'&&el.dataset.familyScope!==scope)||!el.dataset.familySearch.includes(term))?'none':''});
 }
 function addFamilyVersionsToSelection(ids){
  const round=nextOpenSelectionRound();
  if(!round||roundFinished(round)){alert('No open selection group. Ask Admin to open the next group.');return}
  let count=0;
+ const changed=[];
  const allowed=new Set(ids);
  for(const v of allVariants()){
   if(!allowed.has(v.id))continue;
   const prior=variantEntry(v);
   if(['Select','Approved'].includes(prior.decision))continue;
   S.variants[v.id]={...(S.variants[v.id]||{}),decision:'Select',qty:Number(prior.qty)>0?Number(prior.qty):1,roundId:round};
-  count++;
+  count++;changed.push(v.id);
  }
  if(!count){toast('These designs are already selected');return}
  save();
- for(const id of ids)if(['Select','Approved'].includes(variantEntry(allVariants().find(v=>v.id===id)||{}).decision))window.LITeamSync?.itemChanged('variant',id);
+ for(const id of changed)window.LITeamSync?.itemChanged('variant',id);
  toast('Added '+count+' design'+(count===1?'':'s')+' to '+roundName(round));
  familySelectionPicker();
 }
