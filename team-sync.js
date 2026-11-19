@@ -275,6 +275,12 @@ async function onSupabaseIdentity(identity){
   if(typeof PACK==='undefined'||!PACK||r.brandId!==ACTIVE_BRAND_ID)return null;
   const own=r.kind==='catalog'?catalogItemForSelection(r.itemId):allVariants().find(x=>x.id===r.itemId);
   if(own?.sprite)return own;
+  // Use the original authorized family photo when a variant has none.
+  if(r.kind==='variant'){
+   const familyId=String(own?.familyId||r.item?.familyId||'');
+   const family=(PACK.family||[]).find(f=>f.id===familyId);
+   if(family?.sprite)return {...own,sprite:family.sprite};
+  }
   const items=r.kind==='catalog'?(PACK.items||[]):[...(PACK.variant||[]),...(PACK.items||[])];
   const unique=xs=>xs.length===1?xs[0]:null;
   const code=String(r.code||r.item?.code||'').trim().toLowerCase();
@@ -808,7 +814,8 @@ async function onSupabaseIdentity(identity){
  function exportTeamRows(scope){
   // Only the explicitly selected brand and group; never use the full team list.
   // Unlike the on-screen list, this includes more than 200 visible records.
-  return teamExportRecords(scope).map((record,index)=>{
+  // Preserve rejected/skipped records in history, not purchasing exports.
+  return teamExportRecords(scope).filter(record=>!['Rejected','Skip'].includes(String(record.decision||record.entry?.decision||'').trim())).map((record,index)=>{
     const entry=record.entry||{},item=record.item||{};
     const original=String(record.dimension||item.dimension||entry.originalSize||'').trim();
     const requested=String(record.targetSize||entry.targetSize||'').trim();
@@ -900,7 +907,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
   }
   const items=exportTeamRows(scope).filter(x=>!approvedOnly||
     (x.record.decision==='Approved'&&Number(x.record.qty)>0));
-  if(!items.length)return alert('No approved items with quantity match this selection.');
+  if(!items.length)return alert(approvedOnly?'No approved items with quantity match this selection.':'No eligible team selections to export. Rejected and skipped items are excluded.');
   if(withCost&&!['Super Admin','Admin'].includes(role))return alert('Only Admin and Super Admin may export supplier costs.');
   if(withCost){
     if(!window.LISelectionCosts||!(await window.LISelectionCosts.requireAdmin()))return;
@@ -995,7 +1002,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
         row.getCell(13).numFmt='0.0000';
         for(const c of [14,15,16])row.getCell(c).numFmt='"$"#,##0.00';
       }
-      row.height=String(info.record.kind||'').toLowerCase()==='variant'?31:83;
+      row.height=83;
       row.alignment={vertical:'middle',wrapText:true};
       for(let col=1;col<=(withCost?(asfourQuoted?15:16):9);col++){
         sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
@@ -1004,17 +1011,19 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
       // A missing approved image leaves an empty cell, as in the example.
       // Family designs remain a compact single row with Size instead of a
       // large photo block. Catalog products keep their usual image export.
-      const image=String(info.record.kind||'').toLowerCase()==='variant'?
-        null:teamImageForRecord(info.record);
+      const image=teamImageForRecord(info.record);
+      let photoInserted=false;
       if(image?.sprite&&typeof imageFromSprite==='function'){
         try{
           const data=await imageFromSprite(image.sprite,image.urls);
           if(data){
             const imageId=book.addImage({base64:data,extension:'png'});
             sheet.addImage(imageId,{tl:{col:1.06,row:i-1+0.05},ext:{width:92,height:92},editAs:'oneCell'});
+            photoInserted=true;
           }
         }catch(err){console.warn('Unable to include approved product photo',err)}
       }
+      if(!photoInserted){row.getCell(2).value='Photo unavailable';row.getCell(2).font={size:9,color:{argb:'FF777777'}}}
     }
     // Retain the compact original photo sheet; a second index tab labels
     // the exact selection round for all brands and records.
