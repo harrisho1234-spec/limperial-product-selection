@@ -931,8 +931,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
       asfourLists=new Map(list.map(x=>[String(x.supplier_code||'').trim(),x]));
     }
     if(!window.ExcelJS){
-      exportTeamCsv(items,scope,withCost,costData||[],asfourLists);
-      alert('The Excel library did not load. A CSV without photos has been downloaded instead.');
+      alert('Photo-required export stopped: Excel support is unavailable. Refresh the app and retry; CSV cannot include product photos.');
       return;
     }
     // Use the already-authorized catalog photos from the existing secure loader.
@@ -1061,7 +1060,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
     console.error('Team Excel export failed',err);
     if(withCost&&!costData)alert('Secure cost lookup failed; nothing was exported.');
     else if(String(err.message||'').startsWith('MISSING_SELECTION_PHOTOS:'))alert(String(err.message).replace('MISSING_SELECTION_PHOTOS: ','Export stopped to prevent an unidentifiable supplier order.\\n\\n'));
-    else try{exportTeamCsv(items,scope,withCost,costData||[],asfourLists);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
+    else alert('Excel export failed; no photo-less file was created. Please retry. '+String(err.message||err));
   }finally{
     exportingTeamExcel=false;
     if(button){button.disabled=false;button.textContent=originalLabel}
