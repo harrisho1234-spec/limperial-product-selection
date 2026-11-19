@@ -270,48 +270,36 @@ async function onSupabaseIdentity(identity){
   window.LIAppTeamSelectionsChanged?.();
   return data}
  function productFromLocal(r){
-  // Photo references in Team selections are identifiers, not download URLs.
-  // Render only artwork already present in the currently authorized catalog.
   if(typeof PACK==='undefined'||!PACK||r.brandId!==ACTIVE_BRAND_ID)return null;
-  const own=r.kind==='catalog'?catalogItemForSelection(r.itemId):allVariants().find(x=>x.id===r.itemId);
-  if(own?.sprite&&(own.sprite.data||(own.sprite.atlas&&SPRITES[own.sprite.atlas])))return own;
-  // Use the original authorized family photo when a variant has none.
-  if(r.kind==='variant'){
-   const familyId=String(own?.familyId||r.familyId||r.item?.familyId||r.entry?.familyId||'');
-   const family=(PACK.family||[]).find(f=>String(f.id)===familyId);
-   const reference=family&&(typeof familyReferenceSprite==='function'?familyReferenceSprite(family).sprite:family.sprite);
-   if(reference&&(reference.data||(reference.atlas&&SPRITES[reference.atlas])))return {id:own?.id||r.itemId,familyId,sprite:reference};
-  }
+  const valid=x=>!!(x?.sprite&&(x.sprite.data||(x.sprite.atlas&&SPRITES[x.sprite.atlas])));
+  const own=r.kind==='catalog'?catalogItemForSelection(r.itemId):allVariants().find(x=>String(x.id)===String(r.itemId));
+  if(valid(own))return own;
+  const code=String(r.code||r.entry?.code||r.item?.code||'').trim().replace(/\\s+/g,'').toLowerCase();
   const items=r.kind==='catalog'?(PACK.items||[]):[...(PACK.variant||[]),...(PACK.items||[])];
-  const unique=xs=>xs.length===1?xs[0]:null;
-  const code=String(r.code||r.item?.code||'').trim().toLowerCase();
   if(code){
-   const match=unique(items.filter(i=>i.sprite&&String(i.code||'').trim().toLowerCase()===code));
-   if(match)return match;
+    const matches=items.filter(x=>valid(x)&&String(x.code||'').trim().replace(/\\s+/g,'').toLowerCase()===code);
+    const photoKeys=new Set(matches.map(x=>x.sprite.data?'data:'+x.sprite.data.slice(0,128):x.sprite.atlas+'#'+x.sprite.index));
+    if(photoKeys.size===1)return matches[0];
   }
-  // Different team members can save a duplicate with a different selection ID.
-  const name=String(r.name||r.item?.name||'').trim().toLowerCase();
-  if(name){
-   const match=unique(items.filter(i=>i.sprite&&String(i.name||'').trim().toLowerCase()===name));
-   if(match)return match;
+  // A proposed custom design WITHOUT an assigned supplier code can use
+  // an explicitly labeled family reference. Coded wall lamps cannot.
+  const custom=!!(own?.isCustomProposal||r.item?.isCustomProposal||String(r.itemId||'').startsWith('CUSTOM-'));
+  if(r.kind==='variant'&&custom&&!code){
+    const familyId=String(own?.familyId||r.item?.familyId||r.familyId||r.entry?.familyId||'');
+    const family=(PACK.family||[]).find(f=>String(f.id)===familyId);
+    const sprite=family&&(typeof familyReferenceSprite==='function'?familyReferenceSprite(family).sprite:family.sprite);
+    if(sprite&&(sprite.data||(sprite.atlas&&SPRITES[sprite.atlas])))
+      return {id:r.itemId,sprite,familyReferenceOnly:true};
   }
-  // A saved atlas index is a lookup hint only, never an external PDF/image URL.
-  const ref=String(r.photoRef||r.item?.photoRef||r.item?.familyPhotoRef||'').trim();
-  if(ref){
-   const match=unique(items.filter(i=>i.sprite?.atlas&&ref===i.sprite.atlas+'#'+i.sprite.index));
-   if(match)return match;
-  }
-  return own||null;
+  // Never match by a generic description or by the family's cover image.
+  return null;
  }
- // No guessed photo is ever used. A snapshot's family relationship provides an
- // authorized reference for staff who export from a different device.
  function teamImageForRecord(record){
    const item=productFromLocal(record);
-   if(item?.sprite&&(item.sprite.data||(item.sprite.atlas&&SPRITES[item.sprite.atlas]))){
+   if(item?.sprite){
      const picked=window.LITLPicker?.parseRef(record.item?.sourceRef);
-     const matches=picked&&(picked.parentId===item.id||picked.parentId===item.sourceItemId);
-     const sprite=matches?{...item.sprite,cropRect:picked.crop}:item.sprite;
-     return {sprite,urls:SPRITES};
+     const matches=!item.familyReferenceOnly&&picked&&(picked.parentId===item.id||picked.parentId===item.sourceItemId);
+     return {sprite:matches?{...item.sprite,cropRect:picked.crop}:item.sprite,urls:SPRITES,familyReferenceOnly:!!item.familyReferenceOnly};
    }
    return window.LICentralCatalog?.teamPhotoFor?.(record)||null;
  }
@@ -334,9 +322,10 @@ async function onSupabaseIdentity(identity){
  function snapshot(kind,id){if(!PACK)return null;const item=kind==='catalog'?catalogItemForSelection(id):allVariants().find(x=>x.id===id);if(!item)return null;const entry=kind==='catalog'?candidateEntry(item):variantEntry(item);
   const family=kind==='variant'?(PACK.family||[]).find(f=>f.id===item.familyId):null;
   const familyPhoto=family&&(typeof familyReferenceSprite==='function'?familyReferenceSprite(family).sprite:family.sprite);
-  const imageSprite=(item.sprite?.data||(item.sprite?.atlas&&SPRITES[item.sprite.atlas]))?item.sprite:(familyPhoto||null);
+  const ownPhoto=(item.sprite?.data||(item.sprite?.atlas&&SPRITES[item.sprite.atlas]))?item.sprite:null;
+  const imageSprite=ownPhoto||((kind==='variant'&&item.isCustomProposal&&!String(entry.code||item.code||'').trim())?familyPhoto:null);
   const imageRef=imageSprite?.atlas?imageSprite.atlas+'#'+imageSprite.index:'';
-  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,familyId:kind==='variant'?item.familyId||'':'',familyPhotoRef:familyPhoto?.atlas?familyPhoto.atlas+'#'+familyPhoto.index:'',code:item.code||'',name:typeof cleanAsfourProductName==='function'?cleanAsfourProductName(item.name||item.type||'',item.source,ACTIVE_BRAND_ID):(item.name||item.type||''),type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:imageRef||item.sourceRef||''},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
+  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,isCustomProposal:!!item.isCustomProposal,familyId:kind==='variant'?item.familyId||'':'',familyPhotoRef:familyPhoto?.atlas?familyPhoto.atlas+'#'+familyPhoto.index:'',code:item.code||'',name:typeof cleanAsfourProductName==='function'?cleanAsfourProductName(item.name||item.type||'',item.source,ACTIVE_BRAND_ID):(item.name||item.type||''),type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:imageRef||item.sourceRef||''},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
  async function publish(kind,id){if(!token||!email)return;const data=snapshot(kind,id);if(!data)return;if(!hasRole()&&(data.entry.decision==='Approved'||data.entry.supplierStatus==='Confirmed')){lastError='Only management can approve or confirm products for the team.';status='error';paint();return}
   // Prevent accidental repeat submissions by the same staff member.
   if(!records.some(r=>r.recordId===data.recordId&&!r.deleted)){
@@ -1017,14 +1006,9 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
       // Never embed original price-list PDFs or unapproved external URLs.
       // Every row must use its own authorized design photo or an explicitly linked family reference.
       const image=teamImageForRecord(info.record);
-      // A custom design can use its own family's image as a reference, but it
-      // must not be mistaken for a supplier-confirmed rendering of that size.
-      if(String(info.record.kind||'').toLowerCase()==='variant'){
-        const own=info.record.brandId===ACTIVE_BRAND_ID?allVariants().find(v=>String(v.id)===String(info.record.itemId)):null;
-        if(!own?.sprite?.data&&!(own?.sprite?.atlas&&SPRITES[own.sprite.atlas])){
-          row.getCell(2).note='Family reference photo only. The exact custom size and design must be confirmed by the supplier.';
-          row.getCell(4).note='Custom proposal: image is a family reference, not a confirmed manufacturing drawing.';
-        }
+      if(image?.familyReferenceOnly){
+        row.getCell(2).note='FAMILY REFERENCE ONLY: not a rendering of this custom design. Confirm shape, dimensions and finish with supplier.';
+        row.getCell(4).value=info.description+' [FAMILY REFERENCE ONLY]';
       }
       let photoInserted=false;
       if(image?.sprite&&typeof imageFromSprite==='function'){
