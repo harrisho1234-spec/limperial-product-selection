@@ -313,6 +313,50 @@ function renderFamilies(){const ql=SEARCH.toLowerCase();const list=PACK.family.f
    '<button class="btn quiet small" data-action="exportFamilies" '+(!list.length?'disabled':'')+'>Without Cost</button>'+
    '<button class="btn quiet small" data-action="exportFamiliesWithCost" '+(!list.length?'disabled':'')+'>With Cost · Admin only</button></div></details>':
    '<button class="btn secondary" data-action="exportFamilies" '+(!list.length?'disabled':'')+'>⬇ Export Excel</button>'}<button class="btn" data-action="newFamily">＋ ${['Super Admin','Admin'].includes(window.LITeamSync?.getRoles?.()?.role)?'Create family':'Personal family draft'}</button></div><div class="subheading"><h2>${list.length} design families</h2><span class="tiny">${ACTIVE_BRAND_ID==='asfour'?'Imported from Product Performance.xlsx; custom proposals remain unconfirmed':'Custom family designs and supplier references'}</span></div><div class="f-grid">${list.map(f=>{let versions=allVariants().filter(v=>v.familyId===f.id),summary=familyVariantRows(versions),n=summary.visible.length,collapsed=summary.collapsed;return `<article class="f-card"><div class="mini-photo">${sprite(f.sprite)}</div><div class="f-copy"><div class="tiny">${q(f.id)} · ${n} design references${collapsed?` · ${collapsed} repeats collapsed`:``}</div><h3>${q(f.mainCode||f.name)}</h3>${window.LISelectionCosts?.listPriceMarkup?.(f.mainCode)||''}<p>Your preferred collection · supplier size confirmation pending</p><button class="btn secondary small" data-action="family" data-id="${q(f.id)}">Review family →</button></div></article>`}).join('')}</div>`}
+// Family-to-selection picker: reuse the existing family IDs, variants, rounds and access rules.
+function familySelectionPicker(){
+ if(!PACK?.family?.length){toast('No design families available for this brand');return}
+ MODAL={type:'family-selection'};
+ const families=PACK.family;
+ $('drawerContent').innerHTML='<div class="drawer-header"><div><div class="tiny">MY SELECTIONS</div><h2>Add from Family</h2></div><button class="close" data-action="close">×</button></div>'+
+ '<div class="drawer-body"><div class="toolbar"><div class="search"><input id="familyPickerSearch" placeholder="Search family, code or design…" aria-label="Search families"></div><select id="familyPickerScope" aria-label="Family visibility"><option value="all">All families</option><option value="shared">Shared Families</option><option value="personal">My Families</option></select></div>'+
+ '<p class="tiny">Choose designs individually or add the whole family. Existing selections and approval decisions are preserved; finished groups remain read-only.</p>'+
+ '<div id="familyPickerList">'+families.map(f=>{
+  const variants=allVariants().filter(v=>v.familyId===f.id),summary=familyVariantRows(variants);
+  const rows=summary.visible;
+  return '<section class="candidate-row family-picker-group" data-family-scope="'+(f.shared?'shared':'personal')+'" data-family-search="'+q([f.name,f.id,f.mainCode,...rows.map(v=>v.code||v.type)].join(' ').toLowerCase())+'">'+
+   '<div class="selection-card-head">'+photo(f.sprite,'selection-thumb')+'<div class="selection-card-copy"><strong>'+q(f.mainCode||f.name)+'</strong><div class="tiny">'+(f.shared?'Shared Family':'My Family')+' · '+rows.length+' designs</div></div></div>'+
+   '<div class="row-actions"><button class="btn small" data-action="addWholeFamily" data-id="'+q(f.id)+'" '+(!rows.length?'disabled':'')+'>＋ Add entire family</button>'+
+   '<button class="btn quiet small" data-action="family" data-id="'+q(f.id)+'">View Family</button></div>'+
+   '<div class="row-list">'+rows.map(v=>{const e=variantEntry(v),picked=['Select','Approved'].includes(e.decision);
+    return '<div class="candidate-row"><div class="selection-card-head">'+photo(v.sprite||f.sprite,'selection-thumb')+
+    '<div class="selection-card-copy"><strong>'+q(e.code||v.code||v.type)+'</strong><div class="tiny">'+q(v.type||'Design')+' · '+q(e.targetSize||v.originalSize||'')+'</div>'+
+    '<div class="row-actions"><button class="btn secondary small" data-action="addFamilyVariant" data-id="'+q(v.id)+'" '+(picked?'disabled':'')+'>'+(picked?'✓ Selected':'＋ Add design')+'</button></div></div></div></div>'}).join('')+'</div></section>';
+ }).join('')+'</div></div>';
+ showDrawer();
+}
+function filterFamilySelectionPicker(){
+ const term=String($('familyPickerSearch')?.value||'').trim().toLowerCase(),scope=$('familyPickerScope')?.value||'all';
+ document.querySelectorAll('.family-picker-group').forEach(el=>{el.hidden=(scope!=='all'&&el.dataset.familyScope!==scope)||!el.dataset.familySearch.includes(term)});
+}
+function addFamilyVersionsToSelection(ids){
+ const round=nextOpenSelectionRound();
+ if(!round||roundFinished(round)){alert('No open selection group. Ask Admin to open the next group.');return}
+ let count=0;
+ const allowed=new Set(ids);
+ for(const v of allVariants()){
+  if(!allowed.has(v.id))continue;
+  const prior=variantEntry(v);
+  if(['Select','Approved'].includes(prior.decision))continue;
+  S.variants[v.id]={...(S.variants[v.id]||{}),decision:'Select',qty:Number(prior.qty)>0?Number(prior.qty):1,roundId:round};
+  count++;
+ }
+ if(!count){toast('These designs are already selected');return}
+ save();
+ for(const id of ids)if(['Select','Approved'].includes(variantEntry(allVariants().find(v=>v.id===id)||{}).decision))window.LITeamSync?.itemChanged('variant',id);
+ toast('Added '+count+' design'+(count===1?'':'s')+' to '+roundName(round));
+ familySelectionPicker();
+}
 function renderSelected(){
  const candidatesAll=candidates();
  const selectedVariants=allVariants().filter(v=>['Select','Approved'].includes(variantEntry(v).decision));
@@ -332,7 +376,7 @@ function renderSelected(){
       '<div class="selection-card-copy"><strong>'+q(v.familyId)+' · '+q(v.type)+'</strong>'+
       '<div class="tiny">'+q(e.code||'Custom code pending')+' · '+q(e.targetSize)+'</div>'+
       '<div class="row-actions selection-card-actions"><label class="selection-round-item-label">Group <select '+(roundFinished(round.id)?'disabled ':'')+'data-round-kind="variant" data-id="'+q(v.id)+'" aria-label="Move family version to selection group">'+roundOptions(round.id)+'</select></label>'+
-      '<button class="btn quiet small" data-action="family" data-id="'+q(v.familyId)+'">Review family</button></div></div></div></div>';
+      '<button class="btn quiet small" data-action="family" data-id="'+q(v.familyId)+'">View Family</button></div></div></div></div>';
     }).join('')+'</div>':'')+
    '</section>';
  }).join('');
@@ -340,7 +384,7 @@ function renderSelected(){
   '<div class="statbox"><strong>'+selectedVariants.length+'</strong><small>Family versions selected</small></div>'+
   '<div class="statbox"><strong>'+orderRows().length+'</strong><small>Approved and confirmed</small></div></div>'+
   selectionRoundsBar()+
-  '<div class="toolbar"><button class="btn" data-action="exportDraft" '+(draftRows(active).length?'':'disabled')+' aria-label="Download '+q(draftRoundLabel(active))+' as Excel">⬇ Download '+q(draftRoundLabel(active))+' (.xlsx)</button>'+
+  '<div class="toolbar"><button class="btn secondary" data-action="familySelectionPicker">＋ Add from Family</button><button class="btn" data-action="exportDraft" '+(draftRows(active).length?'':'disabled')+' aria-label="Download '+q(draftRoundLabel(active))+' as Excel">⬇ Download '+q(draftRoundLabel(active))+' (.xlsx)</button>'+
   (ACTIVE_BRAND_ID==='lumax'&&['Super Admin','Admin'].includes(window.LITeamSync?.getRoles?.()?.role)?
    '<button class="btn secondary" data-action="exportDraftWithPricing" '+(draftRows(active).length?'':'disabled')+'>⬇ With RMB costing &amp; selling · Admin</button>':'')+
   '<span class="tiny">Groups organize your work; existing approval statuses and supplier confirmations remain unchanged.</span></div>'+
@@ -864,7 +908,7 @@ document.addEventListener('click',async e=>{if(!window.LITeamSync?.status()?.con
    if(MODAL?.type==='item'&&MODAL.id===id)itemDrawer(id);else render()
   })}catch(e){alert('Unable to save LM pricing: '+e.message)}
  break;
-}case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{
+}case 'familySelectionPicker':familySelectionPicker();break;case 'addFamilyVariant':addFamilyVersionsToSelection([id]);break;case 'addWholeFamily':addFamilyVersionsToSelection(allVariants().filter(v=>v.familyId===id).map(v=>v.id));break;case 'family':familyDrawer(id);break;case 'toggleFamilyRepeats':{if(FAMILY_SHOW_ALL_VARIANTS.has(id))FAMILY_SHOW_ALL_VARIANTS.delete(id);else FAMILY_SHOW_ALL_VARIANTS.add(id);familyDrawer(id);break}case 'custom':customDrawer(id);break;case 'close':closeDrawer();break;case 'shortlist':{
  const already=selectionForItem(id);
  if(already&&roundFinished(entryRoundId(already))){
   if(!confirm('This product belongs to a Finished selection. Create a new copy in the next Open group?'))break;
@@ -909,13 +953,13 @@ if(t.dataset.roundKind){
  }else return;
  save();window.LITeamSync?.itemChanged(kind,id);renderSelected();toast('Moved to '+roundName(roundId));return;
 }
-if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.id==='tlCatalogView'){TL_CATALOG_VIEW=t.value==='pages'?'pages':'products';KIND='all';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={roundId:nextOpenSelectionRound()||'round-1'};if(roundFinished(entryRoundId(S[collection][t.dataset.id]))){alert('This selection group is Finished and read-only.');render();return}if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}const entry=S[collection][t.dataset.id];
+if(t.id==='familyPickerScope'){filterFamilySelectionPicker();return}if(t.id==='srcFilter'){SRC=t.value;LIMIT=48;renderDiscover();return}if(t.id==='kindFilter'){KIND=t.value;LIMIT=48;renderDiscover();return}if(t.id==='asfourReferenceFilter'){ASFOUR_REFERENCE_FILTER=['products','information','all'].includes(t.value)?t.value:'products';LIMIT=48;renderDiscover();return}if(t.id==='tlCatalogView'){TL_CATALOG_VIEW=t.value==='pages'?'pages':'products';KIND='all';LIMIT=48;renderDiscover();return}if(t.dataset.action==='compare'){const id=t.dataset.id;S.compare=t.checked?[...S.compare.filter(x=>x!==id),id].slice(-2):S.compare.filter(x=>x!==id);save();if(S.compare.length===2){compareDrawer()}return}if(t.dataset.edit){let collection=t.dataset.edit==='catalog'?(isCatalogCopy(t.dataset.id)?'catalogDuplicates':'catalog'):'variants';if(!S[collection][t.dataset.id])S[collection][t.dataset.id]={roundId:nextOpenSelectionRound()||'round-1'};if(roundFinished(entryRoundId(S[collection][t.dataset.id]))){alert('This selection group is Finished and read-only.');render();return}if(((t.dataset.key==='decision'&&['Approved','Rejected'].includes(t.value))||(t.dataset.key==='supplierStatus'&&t.value==='Confirmed'))&&window.LITeamSync?.status()?.connected&&!['Super Admin','Admin','Manager'].includes(window.LITeamSync.getRoles().role)){alert('Only management can approve or confirm products for the shared team.');render();return}const entry=S[collection][t.dataset.id];
 if(t.dataset.key==='decision'&&['Select','Approved'].includes(t.value)&&!entry.roundId)entry.roundId=chosenRoundId()==='all'?'round-1':chosenRoundId();
 if(t.dataset.key==='decision'&&['Select','Approved'].includes(t.value)&&
   !['Select','Approved'].includes(entry.decision||'Review')&&
   !(Number(entry.qty)>0))entry.qty=1;
 entry[t.dataset.key]=t.dataset.key==='qty'?Math.max(0,Number(t.value)||0):t.value;save();window.LITeamSync?.itemChanged(collection==='catalog'?'catalog':'variant',t.dataset.id);if(VIEW==='order')renderOrder();return}});
-document.addEventListener('input',e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='catalogSearch'){SEARCH=e.target.value;LIMIT=48;const start=e.target.selectionStart;renderDiscover();$('catalogSearch').focus();$('catalogSearch').setSelectionRange(start,start)}if(e.target.id==='familySearch'){SEARCH=e.target.value;renderFamilies();$('familySearch').focus()}});
+document.addEventListener('input',e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='catalogSearch'){SEARCH=e.target.value;LIMIT=48;const start=e.target.selectionStart;renderDiscover();$('catalogSearch').focus();$('catalogSearch').setSelectionRange(start,start)}if(e.target.id==='familySearch'){SEARCH=e.target.value;renderFamilies();$('familySearch').focus()}if(e.target.id==='familyPickerSearch')filterFamilySelectionPicker()});
 document.addEventListener('submit',async e=>{if(!window.LITeamSync?.status()?.connected)return;if(e.target.id==='addBrandForm'){e.preventDefault();try{await addNewBrand(e.target)}catch(err){alert('Unable to add brand: '+err.message)}return}if(e.target.id==='newBrandProductForm'){e.preventDefault();try{await addManualProduct(e.target)}catch(err){alert('Unable to add product: '+err.message)}return}if(e.target.id==='newFamilyForm'){e.preventDefault();try{await createFamily(e.target)}catch(err){alert('Unable to create family: '+err.message)}return}if(e.target.id==='newCustomForm'){e.preventDefault();let d=new FormData(e.target),fid=MODAL?.id;if(!fid)return;const family=PACK.family.find(f=>f.id===fid);let id='CUSTOM-'+Date.now().toString(36);let v={id,familyId:fid,type:String(d.get('type')),code:String(d.get('code')),targetSize:String(d.get('size')),request:String(d.get('request')),finish:'',crystal:'',spec:'',sourceRef:'User proposed size',referenceKind:'CUSTOM DESIGN — not a supplier standard',isCustomProposal:true,supplierStatus:'Not requested',decision:'Review',qty:0,sprite:family.sprite};S.manual.push(v);save();toast('Custom version added; supplier confirmation required');familyDrawer(fid)}});
 window.LIAppAuthorized=()=>{if(VIEW==='team')VIEW='brands';render()};
 $('overlay').addEventListener('click',e=>{if(e.target===$('overlay'))closeDrawer()});document.addEventListener('keydown',e=>{
