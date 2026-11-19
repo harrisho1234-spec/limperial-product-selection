@@ -62,6 +62,7 @@
   const all=catalog(),filter=clean(window.LIAsfourGuideSearch).toLowerCase();
   const found=all.filter(x=>[x.code,...x.records.flatMap(r=>[r.name,r.type,r.dimension])].join(' ').toLowerCase().includes(filter));
   app.innerHTML='<div class="toolbar"><div class="search"><input id="liCodeGuideSearch" placeholder="Search code, product, size…" value="'+escapeText(window.LIAsfourGuideSearch||'')+'"></div><span class="tiny">'+found.length+' unique codes · '+all.length+' total</span></div>'+
+   '<div class="row-actions"><button class="btn secondary small" data-action="asfourCodeInfo" data-code="'+escapeText(window.LIAsfourGuideSearch||'')+'" id="liCodeDecodeTyped">Decode entered code</button></div>'+
    '<div class="alert">This guide derives codes and product descriptions from the loaded private Asfour catalog. The four code segments are a working interpretation, not an official complete manufacturer key. Unknown codes remain unverified.</div>'+
    '<div class="li-code-table-wrap"><table class="order-table"><thead><tr><th>Supplier code</th><th>Catalog description / references</th><th>Details</th></tr></thead><tbody>'+
    found.slice(0,150).map(c=>'<tr><td><b>'+escapeText(c.code)+'</b></td><td>'+escapeText(c.records.map(r=>r.name||r.type||'Reference').filter(Boolean).slice(0,2).join(' · '))+(c.records.length>2?' · …':'')+'<div class="tiny">'+c.records.length+' source reference(s)</div></td><td>'+button(c.code)+'</td></tr>').join('')+
@@ -73,6 +74,7 @@
   window.LIAsfourGuideSearch=e.target.value;
   const start=e.target.selectionStart;
   render();
+  const decodeButton=document.getElementById('liCodeDecodeTyped');if(decodeButton)decodeButton.dataset.code=e.target.value;
   const input=document.getElementById('liCodeGuideSearch');
   if(input){input.focus();input.setSelectionRange(start,start)}
  });
