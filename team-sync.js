@@ -277,9 +277,9 @@ async function onSupabaseIdentity(identity){
   if(own?.sprite)return own;
   // Use the original authorized family photo when a variant has none.
   if(r.kind==='variant'){
-   const familyId=String(own?.familyId||r.item?.familyId||'');
-   const family=(PACK.family||[]).find(f=>f.id===familyId);
-   if(family?.sprite)return {...own,sprite:family.sprite};
+   const familyId=String(own?.familyId||r.familyId||r.item?.familyId||r.entry?.familyId||'');
+   const family=(PACK.family||[]).find(f=>String(f.id)===familyId);
+   if(family?.sprite)return {id:own?.id||r.itemId,familyId,sprite:family.sprite};
   }
   const items=r.kind==='catalog'?(PACK.items||[]):[...(PACK.variant||[]),...(PACK.items||[])];
   const unique=xs=>xs.length===1?xs[0]:null;
@@ -295,13 +295,15 @@ async function onSupabaseIdentity(identity){
    if(match)return match;
   }
   // A saved atlas index is a lookup hint only, never an external PDF/image URL.
-  const ref=String(r.photoRef||'').trim();
+  const ref=String(r.photoRef||r.item?.photoRef||r.item?.familyPhotoRef||'').trim();
   if(ref){
    const match=unique(items.filter(i=>i.sprite?.atlas&&ref===i.sprite.atlas+'#'+i.sprite.index));
    if(match)return match;
   }
   return own||null;
  }
+ // No guessed photo is ever used. A snapshot's family relationship provides an
+ // authorized reference for staff who export from a different device.
  function teamImageForRecord(record){
    const item=productFromLocal(record);
    if(item?.sprite&&(item.sprite.data||(item.sprite.atlas&&SPRITES[item.sprite.atlas]))){
@@ -329,7 +331,10 @@ async function onSupabaseIdentity(identity){
  }
  function recordId(kind,id){return email+'|'+ACTIVE_BRAND_ID+'|'+kind+'|'+id}
  function snapshot(kind,id){if(!PACK)return null;const item=kind==='catalog'?catalogItemForSelection(id):allVariants().find(x=>x.id===id);if(!item)return null;const entry=kind==='catalog'?candidateEntry(item):variantEntry(item);
-  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,code:item.code||'',name:typeof cleanAsfourProductName==='function'?cleanAsfourProductName(item.name||item.type||'',item.source,ACTIVE_BRAND_ID):(item.name||item.type||''),type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:item.sprite?.atlas?item.sprite.atlas+'#'+item.sprite.index:(item.sourceRef||'')},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
+  const family=kind==='variant'?(PACK.family||[]).find(f=>f.id===item.familyId):null;
+  const imageSprite=item.sprite||family?.sprite||null;
+  const imageRef=imageSprite?.atlas?imageSprite.atlas+'#'+imageSprite.index:'';
+  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,familyId:kind==='variant'?item.familyId||'':'',familyPhotoRef:family?.sprite?.atlas?family.sprite.atlas+'#'+family.sprite.index:'',code:item.code||'',name:typeof cleanAsfourProductName==='function'?cleanAsfourProductName(item.name||item.type||'',item.source,ACTIVE_BRAND_ID):(item.name||item.type||''),type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:imageRef||item.sourceRef||''},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
  async function publish(kind,id){if(!token||!email)return;const data=snapshot(kind,id);if(!data)return;if(!hasRole()&&(data.entry.decision==='Approved'||data.entry.supplierStatus==='Confirmed')){lastError='Only management can approve or confirm products for the team.';status='error';paint();return}
   // Prevent accidental repeat submissions by the same staff member.
   if(!records.some(r=>r.recordId===data.recordId&&!r.deleted)){
@@ -958,6 +963,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
     sheet.getRow(1).font={bold:true,color:{argb:'FF17304D'},size:11};
     sheet.getRow(1).alignment={vertical:'middle'};
     sheet.getRow(1).height=28;
+    const photoReady=[];
     for(let n=0;n<items.length;n++){
       const info=items[n],i=n+2,row=sheet.getRow(i);
       row.values=[info.number,'',info.code,info.description,info.original,info.requested,info.qty,info.finish,info.request];
@@ -1008,9 +1014,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
         sheet.getCell(i,col).border={bottom:{style:'thin',color:{argb:'FFE7E7E7'}}};
       }
       // Never embed original price-list PDFs or unapproved external URLs.
-      // A missing approved image leaves an empty cell, as in the example.
-      // Family designs remain a compact single row with Size instead of a
-      // large photo block. Catalog products keep their usual image export.
+      // Every row must use its own authorized design photo or an explicitly linked family reference.
       const image=teamImageForRecord(info.record);
       let photoInserted=false;
       if(image?.sprite&&typeof imageFromSprite==='function'){
@@ -1023,7 +1027,14 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
           }
         }catch(err){console.warn('Unable to include approved product photo',err)}
       }
-      if(!photoInserted){row.getCell(2).value='Photo unavailable';row.getCell(2).font={size:9,color:{argb:'FF777777'}}}
+      photoReady.push(photoInserted);
+    }
+    const missing=items.filter((x,index)=>!photoReady[index]);
+    if(missing.length){
+      const names=missing.slice(0,12).map(x=>x.number+'. '+(x.code||x.description||'Unnamed design')).join('\\n');
+      throw new Error('MISSING_SELECTION_PHOTOS: '+missing.length+' design(s) have no verified photo.\\n'+names+
+        (missing.length>12?'\\n…and '+(missing.length-12)+' more':'')+
+        '\\nOpen the matching Design Family, attach/publish the correct reference photo, then export again.');
     }
     // Retain the compact original photo sheet; a second index tab labels
     // the exact selection round for all brands and records.
@@ -1049,6 +1060,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
   }catch(err){
     console.error('Team Excel export failed',err);
     if(withCost&&!costData)alert('Secure cost lookup failed; nothing was exported.');
+    else if(String(err.message||'').startsWith('MISSING_SELECTION_PHOTOS:'))alert(String(err.message).replace('MISSING_SELECTION_PHOTOS: ','Export stopped to prevent an unidentifiable supplier order.\\n\\n'));
     else try{exportTeamCsv(items,scope,withCost,costData||[],asfourLists);alert('Excel export failed; downloaded CSV without embedded photos instead.')}catch(e){alert('Unable to export team selections: '+e.message)}
   }finally{
     exportingTeamExcel=false;
