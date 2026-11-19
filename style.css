@@ -661,3 +661,15 @@ body.li-auth-unlocked .li-auth-gate{display:none}
  color:#68777a;background:#f1f3f1;opacity:.84
 }
 @media(max-width:650px){.team-round-lifecycle{padding:10px 12px}.team-round-state{margin-top:4px}}
+
+/* Asfour code dictionary (read-only; consistent with existing compact UI). */
+.li-code-breakdown{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 18px}
+.li-code-segment{border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;align-items:flex-start;gap:12px;background:#fff}
+.li-code-numeric{font-size:18px;line-height:1.2;font-weight:700;color:#725423;font-variant-numeric:tabular-nums}
+.li-code-segment span:last-child{display:flex;flex-direction:column;gap:3px;min-width:0}
+.li-code-segment small{font-size:11px;color:#657083;line-height:1.45}
+.li-code-match{padding:10px 4px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:3px}
+.li-code-table-wrap{width:100%;overflow:auto}
+.li-code-table-wrap table{width:100%}
+.li-code-info{white-space:nowrap}
+@media(max-width:640px){.li-code-breakdown{grid-template-columns:1fr}.li-code-segment{padding:10px}.li-code-table-wrap td,.li-code-table-wrap th{min-width:100px}}
