@@ -274,12 +274,13 @@ async function onSupabaseIdentity(identity){
   // Render only artwork already present in the currently authorized catalog.
   if(typeof PACK==='undefined'||!PACK||r.brandId!==ACTIVE_BRAND_ID)return null;
   const own=r.kind==='catalog'?catalogItemForSelection(r.itemId):allVariants().find(x=>x.id===r.itemId);
-  if(own?.sprite)return own;
+  if(own?.sprite&&(own.sprite.data||(own.sprite.atlas&&SPRITES[own.sprite.atlas])))return own;
   // Use the original authorized family photo when a variant has none.
   if(r.kind==='variant'){
    const familyId=String(own?.familyId||r.familyId||r.item?.familyId||r.entry?.familyId||'');
    const family=(PACK.family||[]).find(f=>String(f.id)===familyId);
-   if(family?.sprite)return {id:own?.id||r.itemId,familyId,sprite:family.sprite};
+   const reference=family&&(typeof familyReferenceSprite==='function'?familyReferenceSprite(family).sprite:family.sprite);
+   if(reference&&(reference.data||(reference.atlas&&SPRITES[reference.atlas])))return {id:own?.id||r.itemId,familyId,sprite:reference};
   }
   const items=r.kind==='catalog'?(PACK.items||[]):[...(PACK.variant||[]),...(PACK.items||[])];
   const unique=xs=>xs.length===1?xs[0]:null;
@@ -332,9 +333,10 @@ async function onSupabaseIdentity(identity){
  function recordId(kind,id){return email+'|'+ACTIVE_BRAND_ID+'|'+kind+'|'+id}
  function snapshot(kind,id){if(!PACK)return null;const item=kind==='catalog'?catalogItemForSelection(id):allVariants().find(x=>x.id===id);if(!item)return null;const entry=kind==='catalog'?candidateEntry(item):variantEntry(item);
   const family=kind==='variant'?(PACK.family||[]).find(f=>f.id===item.familyId):null;
-  const imageSprite=item.sprite||family?.sprite||null;
+  const familyPhoto=family&&(typeof familyReferenceSprite==='function'?familyReferenceSprite(family).sprite:family.sprite);
+  const imageSprite=(item.sprite?.data||(item.sprite?.atlas&&SPRITES[item.sprite.atlas]))?item.sprite:(familyPhoto||null);
   const imageRef=imageSprite?.atlas?imageSprite.atlas+'#'+imageSprite.index:'';
-  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,familyId:kind==='variant'?item.familyId||'':'',familyPhotoRef:family?.sprite?.atlas?family.sprite.atlas+'#'+family.sprite.index:'',code:item.code||'',name:typeof cleanAsfourProductName==='function'?cleanAsfourProductName(item.name||item.type||'',item.source,ACTIVE_BRAND_ID):(item.name||item.type||''),type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:imageRef||item.sourceRef||''},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
+  return {recordId:recordId(kind,id),brandId:ACTIVE_BRAND_ID,kind,itemId:id,item:{id,familyId:kind==='variant'?item.familyId||'':'',familyPhotoRef:familyPhoto?.atlas?familyPhoto.atlas+'#'+familyPhoto.index:'',code:item.code||'',name:typeof cleanAsfourProductName==='function'?cleanAsfourProductName(item.name||item.type||'',item.source,ACTIVE_BRAND_ID):(item.name||item.type||''),type:item.type||'',dimension:item.dimension||'',source:item.source||'',sourceRef:item.sourceRef||'',sourceItemId:item.sourceItemId||item.id,page:item.page||null,photoRef:imageRef||item.sourceRef||''},entry,expectedRevision:versions.get(recordId(kind,id))||0}}
  async function publish(kind,id){if(!token||!email)return;const data=snapshot(kind,id);if(!data)return;if(!hasRole()&&(data.entry.decision==='Approved'||data.entry.supplierStatus==='Confirmed')){lastError='Only management can approve or confirm products for the team.';status='error';paint();return}
   // Prevent accidental repeat submissions by the same staff member.
   if(!records.some(r=>r.recordId===data.recordId&&!r.deleted)){
