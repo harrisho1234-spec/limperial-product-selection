@@ -1374,7 +1374,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
      '<div class="team-list-photo" title="Product preview from authorized supplier catalog">'+img+'</div>'+
      '<div class="team-list-product"><div class="tiny">'+esc(brand)+' · '+esc(r.kind)+'</div>'+
       '<strong title="'+esc(r.code||r.itemId||'')+'">'+esc(r.code||r.itemId)+'</strong>'+
-      '<div class="team-list-description" title="'+esc(recordName)+'">'+esc(recordName)+'</div>'+
+      '<div class="team-list-description" title="'+esc(recordName)+'">'+esc(recordName)+'</div>'+(window.LIAsfourGuide?.button?.(r.brandId==='asfour'?(r.code||r.entry?.code||''):'')||'')+
       (r.dimension?'<span class="tiny">'+esc(r.dimension)+'</span>':'')+'</div>'+
      '<div class="team-list-owner"><span class="team-list-mobile-label">Selected by</span>'+
       '<span title="'+esc(owner)+'">'+esc(owner)+'</span></div>'+
