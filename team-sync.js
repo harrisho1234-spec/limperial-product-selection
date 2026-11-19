@@ -1030,10 +1030,10 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
     }
     const missing=items.filter((x,index)=>!photoReady[index]);
     if(missing.length){
-      const names=missing.slice(0,12).map(x=>x.number+'. '+(x.code||x.description||'Unnamed design')).join('\\n');
-      throw new Error('MISSING_SELECTION_PHOTOS: '+missing.length+' design(s) have no verified photo.\\n'+names+
-        (missing.length>12?'\\n…and '+(missing.length-12)+' more':'')+
-        '\\nOpen the matching Design Family, attach/publish the correct reference photo, then export again.');
+      const names=missing.slice(0,12).map(x=>x.number+'. '+(x.code||x.description||'Unnamed design')).join('\n');
+      throw new Error('MISSING_SELECTION_PHOTOS: '+missing.length+' design(s) have no verified photo.\n'+names+
+        (missing.length>12?'\n…and '+(missing.length-12)+' more':'')+
+        '\nOpen the matching Design Family, attach/publish the correct reference photo, then export again.');
     }
     // Retain the compact original photo sheet; a second index tab labels
     // the exact selection round for all brands and records.
@@ -1059,7 +1059,7 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
   }catch(err){
     console.error('Team Excel export failed',err);
     if(withCost&&!costData)alert('Secure cost lookup failed; nothing was exported.');
-    else if(String(err.message||'').startsWith('MISSING_SELECTION_PHOTOS:'))alert(String(err.message).replace('MISSING_SELECTION_PHOTOS: ','Export stopped to prevent an unidentifiable supplier order.\\n\\n'));
+    else if(String(err.message||'').startsWith('MISSING_SELECTION_PHOTOS:'))alert(String(err.message).replace('MISSING_SELECTION_PHOTOS: ','Export stopped to prevent an unidentifiable supplier order.\n\n'));
     else alert('Excel export failed; no photo-less file was created. Please retry. '+String(err.message||err));
   }finally{
     exportingTeamExcel=false;
