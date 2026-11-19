@@ -315,6 +315,17 @@ function familyReferenceSprite(f){
  const variants=allVariants().filter(v=>String(v.familyId)===String(f?.id));
  const exact=variants.find(v=>String(v.code||'').trim()===String(f?.mainCode||'').trim()&&valid(v.sprite));
  if(exact)return {sprite:exact.sprite,source:'matching design'};
+ // Some family cards were imported without a cover sprite, while the
+ // same confirmed supplier code still exists in the private catalog.
+ const normalize=v=>String(v||'').trim().replace(/\\s+/g,'').toLowerCase();
+ const main=normalize(f?.mainCode);
+ const exactCatalog=main&&(PACK.items||[]).filter(i=>valid(i.sprite)&&normalize(i.code)===main);
+ if(exactCatalog?.length===1)return {sprite:exactCatalog[0].sprite,source:'matching catalog code'};
+ // A family version's exact supplier code is also an acceptable reference,
+ // but do not guess when one code is represented by multiple different images.
+ const codes=new Set(variants.map(v=>normalize(v.code)).filter(Boolean));
+ const catalog=(PACK.items||[]).filter(i=>valid(i.sprite)&&codes.has(normalize(i.code)));
+ if(catalog.length===1)return {sprite:catalog[0].sprite,source:'matching family version'};
  const related=variants.find(v=>valid(v.sprite));
  if(related)return {sprite:related.sprite,source:'related family design'};
  return {sprite:null,source:'missing'};
