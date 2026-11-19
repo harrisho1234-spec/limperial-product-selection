@@ -1017,6 +1017,15 @@ async function exportTeamExcel(withCost=false,approvedOnly=false){
       // Never embed original price-list PDFs or unapproved external URLs.
       // Every row must use its own authorized design photo or an explicitly linked family reference.
       const image=teamImageForRecord(info.record);
+      // A custom design can use its own family's image as a reference, but it
+      // must not be mistaken for a supplier-confirmed rendering of that size.
+      if(String(info.record.kind||'').toLowerCase()==='variant'){
+        const own=info.record.brandId===ACTIVE_BRAND_ID?allVariants().find(v=>String(v.id)===String(info.record.itemId)):null;
+        if(!own?.sprite?.data&&!(own?.sprite?.atlas&&SPRITES[own.sprite.atlas])){
+          row.getCell(2).note='Family reference photo only. The exact custom size and design must be confirmed by the supplier.';
+          row.getCell(4).note='Custom proposal: image is a family reference, not a confirmed manufacturing drawing.';
+        }
+      }
       let photoInserted=false;
       if(image?.sprite&&typeof imageFromSprite==='function'){
         try{
